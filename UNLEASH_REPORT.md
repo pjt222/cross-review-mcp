@@ -1,7 +1,7 @@
 # Unleash the Agents: Cross-Review MCP Broker Analysis
 
 **Date**: 2026-04-01  
-**Agents consulted**: 40 of 69 registered agents across 4 waves  
+**Agents consulted**: 42 of 69 registered agents across 4 waves  
 **Convergence achieved**: Yes — top 3 families exceed 3x null model  
 **Adversarial pass**: Completed (advocatus-diaboli, Wave 3)
 
@@ -152,6 +152,18 @@ signal_phase("A", "complete")   // no findings responded to
 
 ---
 
+### #11: Terminology as epistemic inflation
+
+**Convergence**: 2 agents (etymologist, ip-analyst) — late arrivals, initially stuck in web-search loops
+
+**Finding**: The system's vocabulary systematically overstates its epistemic authority. "Verdict" (Latin *vere dictum*, "truly said") claims truth-bearing authority the agents lack — "opinion" would be honest. "Selection" imports a fitness guarantee from evolutionary biology that requires a ground-truth fitness landscape the system doesn't have. "Drift" makes a dangerous failure mode (correlated shared-prior hallucination) sound like mere neutral motion. "Bandwidth" collapses quality into quantity. The QSG citation functions as authority-borrowing rather than technical derivation — "require more findings to get better reviews" is not non-obvious regardless of the formula attached.
+
+**Sub-finding** (ip-analyst): The protocol structure (message broker + phase FSM + bandwidth threshold) is all prior art. The novelty claim, if any, rests entirely on the QSG application, which is itself applied outside its validated domain (N >= 8, not N = 2).
+
+**Testable prediction** (etymologist): Run the protocol with findings labeled as "verdict" vs. "opinion." Under the "verdict" label, agents should re-raise rejected findings significantly less often — not because arguments are stronger, but because the juridical finality of the word suppresses further inquiry.
+
+---
+
 ## Adversarial Pass Summary
 
 The advocatus-diaboli (Wave 3) challenged the top consensus and made three valid counterarguments:
@@ -168,9 +180,9 @@ The advocatus-diaboli (Wave 3) challenged the top consensus and made three valid
 
 ## Null Model Verification
 
-With K ~ 15 plausible hypothesis families and N = 40 agents:
-- Random convergence per family: ~40/15 = 2.7 agents
-- 3x threshold: 8.1 agents
+With K ~ 16 plausible hypothesis families and N = 42 agents:
+- Random convergence per family: ~42/16 = 2.6 agents
+- 3x threshold: 7.9 agents
 
 | Family | Agents | Ratio | Significant? |
 |--------|--------|-------|-------------|
@@ -180,8 +192,9 @@ With K ~ 15 plausible hypothesis families and N = 40 agents:
 | #4 Unsound protocol | 7 | 2.6x | Borderline (but code-proven) |
 | #5 Destructive poll | 7 | 2.6x | Borderline (but code-proven) |
 | #6-10 | 2-4 | <2x | Below threshold individually |
+| #11 Terminology inflation | 2 | <1x | Below threshold (but uniquely insightful) |
 
-Families 1-2 clearly exceed the null model. Family 3 is at threshold. Families 4-5 are borderline statistically but have direct code evidence proving the hypothesis (the logician's concrete execution path for #4 is independently verifiable).
+Families 1-2 clearly exceed the null model. Family 3 is at threshold. Families 4-5 are borderline statistically but have direct code evidence proving the hypothesis (the logician's concrete execution path for #4 is independently verifiable). Family #11 is below threshold but produced uniquely novel insights no other agent approached.
 
 ---
 
@@ -203,7 +216,7 @@ The deeper architectural question — whether N=2 same-model cross-review produc
 
 ## Validation Checklist
 
-- [x] 40/69 agents consulted (convergence achieved; remaining 29 are domain specialists unlikely to produce new families)
+- [x] 42/69 agents consulted (convergence achieved; remaining 27 are domain specialists unlikely to produce new families)
 - [x] Responses collected in structured format (hypothesis/reasoning/confidence/prediction)
 - [x] Hypotheses deduplicated into 10 families, ranked by convergence count
 - [x] Top 3 families verified against null model (4.8x, 3.7x, 3.0x vs 2.7 expected)
