@@ -5,16 +5,16 @@ MCP server enabling two Claude Code instances to review each other's projects th
 ## Quick Start
 
 ```bash
-# Start the broker
+# Step 1: Start the broker (keep running)
 npm start
 
-# Add to Claude Code (both instances)
-claude mcp add cross-review -- npx tsx /mnt/d/dev/p/cross-review-mcp/src/server.ts
+# Step 2: In each Claude Code instance, add the MCP server
+claude mcp add cross-review --transport http http://localhost:3749/mcp
 ```
 
 ## Architecture
 
-Single-process MCP server with in-memory state. Two Claude Code instances connect via stdio transport. The broker provides:
+Single-process HTTP server with in-memory state. Two Claude Code instances connect via Streamable HTTP transport to a shared broker process. The broker provides:
 
 - **Task queues**: per-agent message buffers (send_task / poll_tasks)
 - **Phase signaling**: lifecycle coordination with blocking wait (signal_phase / wait_for_phase)
@@ -34,11 +34,13 @@ With N=2 and m ≥ 3, the system stays in the selection regime.
 ## Commands
 
 ```bash
-npm start       # Start broker via tsx
+npm start       # Start broker on port 3749 (or CROSS_REVIEW_PORT)
 npm run dev     # Start with file watching
+npm test        # Run test suite
 ```
 
 ## Files
 
-- `src/server.ts` — MCP server with tools and protocol resource
+- `src/server.ts` — HTTP server, per-session McpServer factory, transport wiring
+- `src/broker.ts` — Pure handler functions (extracted for testability)
 - `src/types.ts` — TypeScript type definitions and QSG constants

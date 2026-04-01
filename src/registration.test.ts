@@ -41,7 +41,7 @@ describe("handleRegister", () => {
     expect(result.minBandwidth).toBe(MIN_BANDWIDTH);
   });
 
-  it("rejects duplicate registration", () => {
+  it("re-registers existing agent idempotently (reconnect support)", () => {
     handleRegister(state, {
       agentId: "agent-a",
       project: "proj",
@@ -56,8 +56,12 @@ describe("handleRegister", () => {
       }),
     );
 
-    expect(result.error).toBe("Agent already registered");
+    expect(result.registered).toBe(true);
     expect(result.agentId).toBe("agent-a");
+    expect(result.reconnected).toBe(true);
+    // Queue and phase must be preserved (not reset)
+    expect(state.taskQueues.get("agent-a")).toEqual([]);
+    expect(state.phases.get("agent-a")).toBe("registered");
   });
 
   it("second registration sees first agent in peers list", () => {

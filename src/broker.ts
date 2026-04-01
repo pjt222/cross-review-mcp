@@ -53,7 +53,22 @@ export function handleRegister(
   const { agentId, project, capabilities } = args;
 
   if (state.agents.has(agentId)) {
-    return textResult({ error: "Agent already registered", agentId });
+    // Update registration timestamp to support reconnects (idempotent)
+    const existing = state.agents.get(agentId)!;
+    state.agents.set(agentId, { ...existing, registeredAt: Date.now() });
+
+    const peerCount = state.agents.size;
+    const peers = [...state.agents.keys()].filter((id) => id !== agentId);
+    return textResult({
+      registered: true,
+      agentId,
+      project: existing.project,
+      peerCount,
+      peers,
+      minBandwidth: MIN_BANDWIDTH,
+      protocol: "Cross-review protocol: briefing → review → dialogue → complete",
+      reconnected: true,
+    });
   }
 
   state.agents.set(agentId, { agentId, project, capabilities, registeredAt: Date.now() });
