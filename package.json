@@ -5,7 +5,9 @@
   "main": "src/server.ts",
   "scripts": {
     "start": "tsx src/server.ts",
-    "dev": "tsx --watch src/server.ts"
+    "dev": "tsx --watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "author": "Philipp Thoss <ph.thoss@gmx.de>",
   "license": "MIT",
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^25.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
   }
 }

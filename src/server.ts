@@ -18,13 +18,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   type BrokerState,
-  type Task,
   type FindingResponse,
-  type Phase,
-  type PhaseWaiter,
-  PHASES,
   MIN_BANDWIDTH,
 } from "./types.js";
+import {
+  handleRegister,
+  handleSendTask,
+  handlePollTasks,
+  handleAckTasks,
+  handleSignalPhase,
+  handleWaitForPhase,
+  handleGetStatus,
+} from "./broker.js";
 
 // --- Telemetry (append-only JSONL) ---
 
@@ -48,27 +53,6 @@ const state: BrokerState = {
   sentTaskTypes: new Map(),
 };
 
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function notifyPhaseWaiters(agentId: string, phase: Phase): void {
-  const waiters = state.phaseWaiters.get(agentId) ?? [];
-  const remaining: PhaseWaiter[] = [];
-
-  for (const waiter of waiters) {
-    const targetIndex = PHASES.indexOf(waiter.targetPhase);
-    const currentIndex = PHASES.indexOf(phase);
-    if (currentIndex >= targetIndex) {
-      waiter.resolve({ reached: true });
-    } else {
-      remaining.push(waiter);
-    }
-  }
-
-  state.phaseWaiters.set(agentId, remaining);
-}
-
 // --- MCP Server ---
 
 const server = new McpServer({
@@ -86,42 +70,10 @@ server.tool(
     project: z.string().describe("Project name this agent represents"),
     capabilities: z.array(z.string()).describe("List of capabilities (e.g., ['review', 'suggest'])"),
   },
-  async ({ agentId, project, capabilities }) => {
-    if (state.agents.has(agentId)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Agent already registered", agentId }) }],
-      };
-    }
-
-    state.agents.set(agentId, {
-      agentId,
-      project,
-      capabilities,
-      registeredAt: Date.now(),
-    });
-    state.phases.set(agentId, "registered");
-    state.taskQueues.set(agentId, []);
-    state.phaseWaiters.set(agentId, []);
-    state.sentTaskTypes.set(agentId, new Set());
-    logEvent({ event: "register", agentId, project });
-
-    const peerCount = state.agents.size;
-    const peers = [...state.agents.keys()].filter((id) => id !== agentId);
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          registered: true,
-          agentId,
-          project,
-          peerCount,
-          peers,
-          minBandwidth: MIN_BANDWIDTH,
-          protocol: "Cross-review protocol: briefing → review → dialogue → complete",
-        }),
-      }],
-    };
+  async (args) => {
+    const result = handleRegister(state, args);
+    logEvent({ event: "register", agentId: args.agentId, project: args.project });
+    return result;
   }
 );
 
@@ -136,104 +88,31 @@ server.tool(
     type: z.enum(["briefing", "review_bundle", "question", "response"]).describe("Task type"),
     payload: z.string().describe("JSON-encoded payload matching the task type schema"),
   },
-  async ({ from, to, type, payload }) => {
-    if (!state.agents.has(from)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Sender not registered", from }) }],
-      };
-    }
-
-    if (!state.agents.has(to)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Target agent not registered", to }) }],
-      };
-    }
-
-    if (from === to) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Cannot send tasks to yourself", from, to }) }],
-      };
-    }
-
-    let parsedPayload: unknown;
-    try {
-      parsedPayload = JSON.parse(payload);
-    } catch {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Invalid JSON payload" }) }],
-      };
-    }
-
-    // Enforce minimum bandwidth for review bundles (QSG: Γ_h = mN·h/α)
-    if (type === "review_bundle") {
-      if (!Array.isArray(parsedPayload) || parsedPayload.length < MIN_BANDWIDTH) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              error: `Review bundles must contain at least ${MIN_BANDWIDTH} findings (QSG bandwidth constraint: Γ_h = mN·h/α > 1)`,
-              received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
-              required: MIN_BANDWIDTH,
-            }),
-          }],
-        };
-      }
-    }
-
-    // Enforce that responses address all received findings
-    if (type === "response") {
-      if (!Array.isArray(parsedPayload) || parsedPayload.length === 0) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              error: "Response must contain at least one FindingResponse",
-              received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
-            }),
-          }],
-        };
-      }
-    }
-
-    const task: Task = {
-      id: generateId(),
-      from,
-      to,
-      type,
-      payload: parsedPayload as Task["payload"],
-      createdAt: Date.now(),
-    };
-
-    const queue = state.taskQueues.get(to) ?? [];
-    queue.push(task);
-    state.taskQueues.set(to, queue);
-
-    // Track sent task types for phase precondition checks
-    state.sentTaskTypes.get(from)?.add(type);
+  async (args) => {
+    const result = handleSendTask(state, args);
+    const parsed = JSON.parse(result.content[0].text);
 
     // Log review bundles and verdict responses
-    if (type === "review_bundle" && Array.isArray(parsedPayload)) {
-      const categories = parsedPayload.map((f: Record<string, unknown>) => f.category).filter(Boolean);
-      logEvent({ event: "review_bundle", taskId: task.id, from, to, findingCount: parsedPayload.length, categories });
-    } else if (type === "response" && Array.isArray(parsedPayload)) {
-      for (const response of parsedPayload as FindingResponse[]) {
-        logEvent({ event: "verdict", taskId: task.id, from, to, findingId: response.findingId, verdict: response.verdict });
+    if (!parsed.error) {
+      if (args.type === "review_bundle") {
+        let parsedPayload: unknown[];
+        try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = []; }
+        if (Array.isArray(parsedPayload)) {
+          const categories = parsedPayload.map((f) => (f as Record<string, unknown>).category).filter(Boolean);
+          logEvent({ event: "review_bundle", taskId: parsed.taskId, from: args.from, to: args.to, findingCount: parsedPayload.length, categories });
+        }
+      } else if (args.type === "response") {
+        let parsedPayload: FindingResponse[];
+        try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = []; }
+        if (Array.isArray(parsedPayload)) {
+          for (const response of parsedPayload) {
+            logEvent({ event: "verdict", taskId: parsed.taskId, from: args.from, to: args.to, findingId: response.findingId, verdict: response.verdict });
+          }
+        }
       }
     }
 
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          sent: true,
-          taskId: task.id,
-          from,
-          to,
-          type,
-          findingCount: type === "review_bundle" && Array.isArray(parsedPayload) ? parsedPayload.length : undefined,
-        }),
-      }],
-    };
+    return result;
   }
 );
 
@@ -245,25 +124,7 @@ server.tool(
   {
     agentId: z.string().describe("Your agent ID"),
   },
-  async ({ agentId }) => {
-    if (!state.agents.has(agentId)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Agent not registered", agentId }) }],
-      };
-    }
-
-    const queue = state.taskQueues.get(agentId) ?? [];
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          tasks: queue,
-          count: queue.length,
-        }),
-      }],
-    };
-  }
+  async (args) => handlePollTasks(state, args)
 );
 
 // --- Tool: ack_tasks ---
@@ -275,30 +136,11 @@ server.tool(
     agentId: z.string().describe("Your agent ID"),
     taskIds: z.array(z.string()).describe("IDs of tasks to acknowledge"),
   },
-  async ({ agentId, taskIds }) => {
-    if (!state.agents.has(agentId)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Agent not registered", agentId }) }],
-      };
-    }
-
-    const ackSet = new Set(taskIds);
-    const queue = state.taskQueues.get(agentId) ?? [];
-    const remaining = queue.filter((task) => !ackSet.has(task.id));
-    const ackedCount = queue.length - remaining.length;
-    state.taskQueues.set(agentId, remaining);
-
-    logEvent({ event: "ack_tasks", agentId, ackedCount, remainingCount: remaining.length });
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          acknowledged: ackedCount,
-          remaining: remaining.length,
-        }),
-      }],
-    };
+  async (args) => {
+    const result = handleAckTasks(state, args);
+    const parsed = JSON.parse(result.content[0].text);
+    logEvent({ event: "ack_tasks", agentId: args.agentId, ackedCount: parsed.acknowledged, remainingCount: parsed.remaining });
+    return result;
   }
 );
 
@@ -311,82 +153,14 @@ server.tool(
     agentId: z.string().describe("Your agent ID"),
     phase: z.enum(["briefing", "review", "dialogue", "complete"]).describe("Phase reached"),
   },
-  async ({ agentId, phase }) => {
-    if (!state.agents.has(agentId)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Agent not registered" }) }],
-      };
+  async (args) => {
+    const previousPhase = state.phases.get(args.agentId);
+    const result = handleSignalPhase(state, args);
+    const parsed = JSON.parse(result.content[0].text);
+    if (parsed.phaseUpdated) {
+      logEvent({ event: "phase_change", agentId: args.agentId, from: previousPhase, to: args.phase });
     }
-
-    const currentPhase = state.phases.get(agentId)!;
-    const currentIndex = PHASES.indexOf(currentPhase);
-    const targetIndex = PHASES.indexOf(phase);
-
-    if (targetIndex <= currentIndex) {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            error: "Cannot move backward in phase lifecycle",
-            current: currentPhase,
-            requested: phase,
-          }),
-        }],
-      };
-    }
-
-    // Phase precondition checks
-    const sentTypes = state.sentTaskTypes.get(agentId) ?? new Set();
-
-    if (phase === "review" && !sentTypes.has("briefing")) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          error: "Cannot enter review phase without sending a briefing first",
-          hint: "Use send_task with type 'briefing' before signaling 'review'",
-        }) }],
-      };
-    }
-
-    if (phase === "dialogue" && !sentTypes.has("review_bundle")) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          error: "Cannot enter dialogue phase without sending a review bundle first",
-          hint: "Use send_task with type 'review_bundle' before signaling 'dialogue'",
-        }) }],
-      };
-    }
-
-    if (state.agents.size < 2) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          error: "Cannot advance phase with fewer than 2 registered agents",
-          registered: state.agents.size,
-          required: 2,
-        }) }],
-      };
-    }
-
-    state.phases.set(agentId, phase);
-    notifyPhaseWaiters(agentId, phase);
-    logEvent({ event: "phase_change", agentId, from: currentPhase, to: phase });
-
-    // Report peer phases
-    const peerPhases: Record<string, Phase> = {};
-    for (const [id, p] of state.phases.entries()) {
-      if (id !== agentId) peerPhases[id] = p;
-    }
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          phaseUpdated: true,
-          agentId,
-          phase,
-          peerPhases,
-        }),
-      }],
-    };
+    return result;
   }
 );
 
@@ -399,55 +173,7 @@ server.tool(
     peerId: z.string().describe("The peer agent ID to wait for"),
     phase: z.enum(["registered", "briefing", "review", "dialogue", "complete"]).describe("Phase to wait for"),
   },
-  async ({ peerId, phase }) => {
-    if (!state.agents.has(peerId)) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Peer not registered", peerId }) }],
-      };
-    }
-
-    const currentPhase = state.phases.get(peerId)!;
-    const currentIndex = PHASES.indexOf(currentPhase);
-    const targetIndex = PHASES.indexOf(phase);
-
-    // Already at or past target phase
-    if (currentIndex >= targetIndex) {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ reached: true, peerId, phase, currentPhase }),
-        }],
-      };
-    }
-
-    // Block until peer reaches the phase
-    const result = await new Promise<{ reached: boolean }>((resolve) => {
-      const waiter: PhaseWaiter = { targetPhase: phase, resolve };
-      const waiters = state.phaseWaiters.get(peerId) ?? [];
-      waiters.push(waiter);
-      state.phaseWaiters.set(peerId, waiters);
-
-      // Timeout after 5 minutes — clean up the waiter to prevent memory leak
-      setTimeout(() => {
-        const currentWaiters = state.phaseWaiters.get(peerId) ?? [];
-        state.phaseWaiters.set(peerId, currentWaiters.filter((w) => w !== waiter));
-        resolve({ reached: false });
-      }, 5 * 60 * 1000);
-    });
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          reached: result.reached,
-          peerId,
-          phase,
-          currentPhase: state.phases.get(peerId),
-          timedOut: !result.reached,
-        }),
-      }],
-    };
-  }
+  async (args) => handleWaitForPhase(state, args)
 );
 
 // --- Tool: get_status ---
@@ -456,29 +182,7 @@ server.tool(
   "get_status",
   "Get the current broker state: registered agents, their phases, and pending task counts.",
   {},
-  async () => {
-    const agents: Record<string, { project: string; phase: Phase; pendingTasks: number }> = {};
-
-    for (const [id, reg] of state.agents.entries()) {
-      agents[id] = {
-        project: reg.project,
-        phase: state.phases.get(id) ?? "registered",
-        pendingTasks: (state.taskQueues.get(id) ?? []).length,
-      };
-    }
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          agentCount: state.agents.size,
-          agents,
-          minBandwidth: MIN_BANDWIDTH,
-          qsgNote: `Γ_h = mN·h/α — keep m ≥ ${MIN_BANDWIDTH} to stay in selection regime`,
-        }),
-      }],
-    };
-  }
+  async () => handleGetStatus(state)
 );
 
 // --- Protocol resource ---
