@@ -225,7 +225,7 @@ server.tool(
 
 server.tool(
   "poll_tasks",
-  "Retrieve and drain all pending tasks for this agent.",
+  "Retrieve pending tasks for this agent. Tasks remain in queue until acknowledged via ack_tasks.",
   {
     agentId: z.string().describe("Your agent ID"),
   },
@@ -237,7 +237,6 @@ server.tool(
     }
 
     const queue = state.taskQueues.get(agentId) ?? [];
-    state.taskQueues.set(agentId, []); // drain
 
     return {
       content: [{
@@ -245,6 +244,42 @@ server.tool(
         text: JSON.stringify({
           tasks: queue,
           count: queue.length,
+        }),
+      }],
+    };
+  }
+);
+
+// --- Tool: ack_tasks ---
+
+server.tool(
+  "ack_tasks",
+  "Acknowledge and remove processed tasks from your queue. Call after successfully processing tasks from poll_tasks.",
+  {
+    agentId: z.string().describe("Your agent ID"),
+    taskIds: z.array(z.string()).describe("IDs of tasks to acknowledge"),
+  },
+  async ({ agentId, taskIds }) => {
+    if (!state.agents.has(agentId)) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: "Agent not registered", agentId }) }],
+      };
+    }
+
+    const ackSet = new Set(taskIds);
+    const queue = state.taskQueues.get(agentId) ?? [];
+    const remaining = queue.filter((task) => !ackSet.has(task.id));
+    const ackedCount = queue.length - remaining.length;
+    state.taskQueues.set(agentId, remaining);
+
+    logEvent({ event: "ack_tasks", agentId, ackedCount, remainingCount: remaining.length });
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          acknowledged: ackedCount,
+          remaining: remaining.length,
         }),
       }],
     };
