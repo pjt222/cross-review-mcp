@@ -422,12 +422,15 @@ server.tool(
 
     // Block until peer reaches the phase
     const result = await new Promise<{ reached: boolean }>((resolve) => {
+      const waiter: PhaseWaiter = { targetPhase: phase, resolve };
       const waiters = state.phaseWaiters.get(peerId) ?? [];
-      waiters.push({ targetPhase: phase, resolve });
+      waiters.push(waiter);
       state.phaseWaiters.set(peerId, waiters);
 
-      // Timeout after 5 minutes to prevent indefinite blocking
+      // Timeout after 5 minutes — clean up the waiter to prevent memory leak
       setTimeout(() => {
+        const currentWaiters = state.phaseWaiters.get(peerId) ?? [];
+        state.phaseWaiters.set(peerId, currentWaiters.filter((w) => w !== waiter));
         resolve({ reached: false });
       }, 5 * 60 * 1000);
     });
@@ -471,7 +474,7 @@ server.tool(
           agentCount: state.agents.size,
           agents,
           minBandwidth: MIN_BANDWIDTH,
-          qsgNote: "Γ_h = mN·h/α — keep m ≥ 3 to stay in selection regime",
+          qsgNote: `Γ_h = mN·h/α — keep m ≥ ${MIN_BANDWIDTH} to stay in selection regime`,
         }),
       }],
     };
@@ -480,64 +483,39 @@ server.tool(
 
 // --- Protocol resource ---
 
+const PROTOCOL_DOC = `# Cross-Review Protocol v1.0.0
+
+## Theory
+Based on Quantized Simplex Gossip (Tanaka, 2026, arXiv:2603.24676).
+Central formula: **Γ_h = mN·h/α** where m=findings per bundle, N=agents, h=bias, α=adaptation rate.
+- |Γ_h| ≪ 1 → consensus is random (drift regime)
+- |Γ_h| ≫ 1 → genuine insights amplified (selection regime)
+- Design: m ≥ ${MIN_BANDWIDTH} keeps Γ_h ≈ 1.67 in the selection regime
+
+## Phases (sequential, enforced by broker)
+1. **briefing** — Read own codebase, produce structured Briefing artifact, send to peer. Both agents do this in parallel.
+2. **review** — Wait for peer briefing (wait_for_phase), read peer's actual code, send Finding[] bundle (m ≥ ${MIN_BANDWIDTH}). Must have sent a briefing first.
+3. **dialogue** — Read findings about own project, respond with FindingResponse[] verdicts. Must have sent a review_bundle first.
+4. **complete** — All findings processed. Signal completion.
+
+## Finding Categories
+pattern_transfer, missing_practice, inconsistency, simplification, bug_risk, documentation_gap
+
+## Verdicts
+- **accept** — Finding is valid, will act on it
+- **reject** — Finding is incorrect or inapplicable (provide counterEvidence if available)
+- **discuss** — Needs clarification, creates a sub-task for focused exchange
+`;
+
 server.resource(
   "protocol",
   "cross-review://protocol",
-  { mimeType: "application/json" },
+  { mimeType: "text/markdown" },
   async () => ({
     contents: [{
       uri: "cross-review://protocol",
-      mimeType: "application/json",
-      text: JSON.stringify({
-        name: "Cross-Review Protocol",
-        version: "1.0.0",
-        theory: {
-          paper: "Tanaka (2026), arXiv:2603.24676",
-          model: "Quantized Simplex Gossip (QSG)",
-          centralFormula: "Γ_h = mN·h/α",
-          regimes: {
-            drift: "|Γ_h| ≪ 1 → consensus is random (lottery)",
-            selection: "|Γ_h| ≫ 1 → genuine insights amplified",
-          },
-          designImplication: "Bundle findings (m ≥ 5) to stay in selection regime (Γ_h ≈ 1.67)",
-        },
-        phases: [
-          {
-            name: "briefing",
-            description: "Read own codebase, produce structured Briefing artifact, send to peer",
-            parallel: true,
-          },
-          {
-            name: "review",
-            description: "Wait for peer briefing, read peer's actual code, send Finding[] bundle (m ≥ 3)",
-            parallel: true,
-            constraint: "wait_for_phase(peer, 'briefing') before starting",
-          },
-          {
-            name: "dialogue",
-            description: "Read findings about own project, respond with verdicts (accept/reject/discuss with evidence)",
-            parallel: true,
-            constraint: "wait_for_phase(peer, 'review') before starting",
-          },
-          {
-            name: "complete",
-            description: "All findings processed. Signal completion.",
-          },
-        ],
-        findingCategories: [
-          "pattern_transfer",
-          "missing_practice",
-          "inconsistency",
-          "simplification",
-          "bug_risk",
-          "documentation_gap",
-        ],
-        verdicts: {
-          accept: "Finding is valid, will act on it",
-          reject: "Finding is incorrect or inapplicable (must provide counter_evidence)",
-          discuss: "Needs clarification — creates a sub-task for focused exchange",
-        },
-      }, null, 2),
+      mimeType: "text/markdown",
+      text: PROTOCOL_DOC,
     }],
   })
 );
@@ -548,6 +526,14 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("cross-review-mcp broker started");
+
+  const shutdown = () => {
+    logEvent({ event: "shutdown", agentCount: state.agents.size });
+    console.error("cross-review-mcp broker shutting down");
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 main().catch((error) => {
