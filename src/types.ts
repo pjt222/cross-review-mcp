@@ -116,6 +116,12 @@ export interface PhaseWaiter {
 
 /**
  * QSG-derived minimum bandwidth constant.
- * From Γ_h = mN·h/α > 1 with N=2, α≈0.3, h≈0.05 → m > 3
+ *
+ * From Γ_h = mN·h/α with N=2, α≈0.3, h≈0.05:
+ *   m=3 → Γ_h = 1.0 (critical boundary, not selection regime)
+ *   m=5 → Γ_h = 5/3 ≈ 1.67 (safely above boundary)
+ *
+ * Note: h/α = 1/6 = 1/|FindingCategory|. Adding categories
+ * without raising this constant degrades selection pressure.
  */
-export const MIN_BANDWIDTH = 3;
+export const MIN_BANDWIDTH = 5;

@@ -18,7 +18,7 @@ Single-process MCP server with in-memory state. Two Claude Code instances connec
 
 - **Task queues**: per-agent message buffers (send_task / poll_tasks)
 - **Phase signaling**: lifecycle coordination with blocking wait (signal_phase / wait_for_phase)
-- **Bandwidth enforcement**: review bundles must contain ≥ 3 findings (QSG constraint)
+- **Bandwidth enforcement**: review bundles must contain ≥ 5 findings (QSG constraint, Γ_h ≈ 1.67)
 
 ## QSG Theory (Tanaka, 2026)
 

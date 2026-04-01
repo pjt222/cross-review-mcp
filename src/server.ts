@@ -112,7 +112,7 @@ server.tool(
 
 server.tool(
   "send_task",
-  "Send a task (briefing, review bundle, question, or response) to a peer agent. Review bundles must contain at least 3 findings (QSG bandwidth constraint).",
+  "Send a task (briefing, review bundle, question, or response) to a peer agent. Review bundles must contain at least 5 findings (QSG bandwidth constraint: Γ_h ≈ 1.67).",
   {
     to: z.string().describe("Target agent ID"),
     type: z.enum(["briefing", "review_bundle", "question", "response"]).describe("Task type"),
@@ -386,7 +386,7 @@ server.resource(
             drift: "|Γ_h| ≪ 1 → consensus is random (lottery)",
             selection: "|Γ_h| ≫ 1 → genuine insights amplified",
           },
-          designImplication: "Bundle findings (m ≥ 3) to suppress memetic drift",
+          designImplication: "Bundle findings (m ≥ 5) to stay in selection regime (Γ_h ≈ 1.67)",
         },
         phases: [
           {
