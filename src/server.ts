@@ -12,17 +12,31 @@
  * selection regime where genuine insights dominate over random drift.
  */
 
+import { appendFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
   type BrokerState,
   type Task,
+  type FindingResponse,
   type Phase,
   type PhaseWaiter,
   PHASES,
   MIN_BANDWIDTH,
 } from "./types.js";
+
+// --- Telemetry (append-only JSONL) ---
+
+const LOG_PATH = process.env.CROSS_REVIEW_LOG ?? "./cross-review.jsonl";
+
+function logEvent(event: Record<string, unknown>): void {
+  try {
+    appendFileSync(LOG_PATH, JSON.stringify({ ...event, timestamp: Date.now() }) + "\n");
+  } catch {
+    // Logging failure must never break the broker
+  }
+}
 
 // --- Broker state (in-memory, single process) ---
 
@@ -87,6 +101,7 @@ server.tool(
     state.phases.set(agentId, "registered");
     state.taskQueues.set(agentId, []);
     state.phaseWaiters.set(agentId, []);
+    logEvent({ event: "register", agentId, project });
 
     const peerCount = state.agents.size;
     const peers = [...state.agents.keys()].filter((id) => id !== agentId);
@@ -175,6 +190,16 @@ server.tool(
     queue.push(task);
     state.taskQueues.set(to, queue);
 
+    // Log review bundles and verdict responses
+    if (type === "review_bundle" && Array.isArray(parsedPayload)) {
+      const categories = parsedPayload.map((f: Record<string, unknown>) => f.category).filter(Boolean);
+      logEvent({ event: "review_bundle", taskId: task.id, from, to, findingCount: parsedPayload.length, categories });
+    } else if (type === "response" && Array.isArray(parsedPayload)) {
+      for (const response of parsedPayload as FindingResponse[]) {
+        logEvent({ event: "verdict", taskId: task.id, from, to, findingId: response.findingId, verdict: response.verdict });
+      }
+    }
+
     return {
       content: [{
         type: "text",
@@ -256,6 +281,7 @@ server.tool(
 
     state.phases.set(agentId, phase);
     notifyPhaseWaiters(agentId, phase);
+    logEvent({ event: "phase_change", agentId, from: currentPhase, to: phase });
 
     // Report peer phases
     const peerPhases: Record<string, Phase> = {};
