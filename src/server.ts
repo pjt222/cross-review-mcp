@@ -131,26 +131,27 @@ server.tool(
   "send_task",
   "Send a task (briefing, review bundle, question, or response) to a peer agent. Review bundles must contain at least 5 findings (QSG bandwidth constraint: Γ_h ≈ 1.67).",
   {
+    from: z.string().describe("Your agent ID (the sender)"),
     to: z.string().describe("Target agent ID"),
     type: z.enum(["briefing", "review_bundle", "question", "response"]).describe("Task type"),
     payload: z.string().describe("JSON-encoded payload matching the task type schema"),
   },
-  async ({ to, type, payload }, extra) => {
-    const fromAgent = [...state.agents.entries()].find(
-      ([id]) => id !== to && state.agents.has(id)
-    );
-
-    if (!fromAgent) {
+  async ({ from, to, type, payload }) => {
+    if (!state.agents.has(from)) {
       return {
-        content: [{ type: "text", text: JSON.stringify({ error: "Sender not registered or no other agent found" }) }],
+        content: [{ type: "text", text: JSON.stringify({ error: "Sender not registered", from }) }],
       };
     }
-
-    const from = fromAgent[0];
 
     if (!state.agents.has(to)) {
       return {
         content: [{ type: "text", text: JSON.stringify({ error: "Target agent not registered", to }) }],
+      };
+    }
+
+    if (from === to) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: "Cannot send tasks to yourself", from, to }) }],
       };
     }
 
