@@ -74,7 +74,8 @@ Central formula: **Γ_h = mN·h/α** where m=findings per bundle, N=agents, h=bi
 1. **briefing** — Read own codebase, produce structured Briefing artifact, send to peer. Both agents do this in parallel.
 2. **review** — Wait for peer briefing (wait_for_phase), read peer's actual code, send Finding[] bundle (m ≥ ${MIN_BANDWIDTH}). Must have sent a briefing first.
 3. **dialogue** — Read findings about own project, respond with FindingResponse[] verdicts. Must have sent a review_bundle first.
-4. **complete** — All findings processed. Signal completion.
+4. **synthesis** — Produce a Synthesis artifact: accepted findings with planned actions, rejected findings with reasons. Must have sent a response first. Each agent synthesizes what it learned about its own project.
+5. **complete** — All findings processed and synthesized. Signal completion.
 
 ## Finding Categories
 pattern_transfer, missing_practice, inconsistency, simplification, bug_risk, documentation_gap
@@ -116,7 +117,7 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
     {
       from: z.string().describe("Your agent ID (the sender)"),
       to: z.string().describe("Target agent ID"),
-      type: z.enum(["briefing", "review_bundle", "question", "response"]).describe("Task type"),
+      type: z.enum(["briefing", "review_bundle", "question", "response", "synthesis"]).describe("Task type"),
       payload: z.string().describe("JSON-encoded payload matching the task type schema"),
     },
     async (args) => {
@@ -178,7 +179,7 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
     "Signal that this agent has reached a protocol phase. Phases: registered → briefing → review → dialogue → complete.",
     {
       agentId: z.string().describe("Your agent ID"),
-      phase: z.enum(["briefing", "review", "dialogue", "complete"]).describe("Phase reached"),
+      phase: z.enum(["briefing", "review", "dialogue", "synthesis", "complete"]).describe("Phase reached"),
     },
     async (args) => {
       const previousPhase = brokerState.phases.get(args.agentId);
@@ -197,7 +198,7 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
     "Block until a peer agent reaches a specific phase. Returns immediately if the peer is already at or past that phase.",
     {
       peerId: z.string().describe("The peer agent ID to wait for"),
-      phase: z.enum(["registered", "briefing", "review", "dialogue", "complete"]).describe("Phase to wait for"),
+      phase: z.enum(["registered", "briefing", "review", "dialogue", "synthesis", "complete"]).describe("Phase to wait for"),
     },
     async (args) => handleWaitForPhase(brokerState, args)
   );

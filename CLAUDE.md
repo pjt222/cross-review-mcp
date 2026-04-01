@@ -29,7 +29,7 @@ The drift-selection parameter Γ_h = mN·h/α determines whether multi-agent agr
 - **α** = adaptation rate (how eagerly an agent updates from peer input)
 - **h** = systematic bias (domain expertise)
 
-With N=2 and m ≥ 3, the system stays in the selection regime.
+With N=2 and m ≥ 5, the system stays safely in the selection regime (Γ_h ≈ 1.67).
 
 ## Commands
 

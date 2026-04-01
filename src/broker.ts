@@ -66,7 +66,7 @@ export function handleRegister(
       peerCount,
       peers,
       minBandwidth: MIN_BANDWIDTH,
-      protocol: "Cross-review protocol: briefing → review → dialogue → complete",
+      protocol: "Cross-review protocol: briefing → review → dialogue → synthesis → complete",
       reconnected: true,
     });
   }
@@ -87,7 +87,7 @@ export function handleRegister(
     peerCount,
     peers,
     minBandwidth: MIN_BANDWIDTH,
-    protocol: "Cross-review protocol: briefing → review → dialogue → complete",
+    protocol: "Cross-review protocol: briefing → review → dialogue → synthesis → complete",
   });
 }
 
@@ -226,6 +226,13 @@ export function handleSignalPhase(
     return textResult({
       error: "Cannot enter dialogue phase without sending a review bundle first",
       hint: "Use send_task with type 'review_bundle' before signaling 'dialogue'",
+    });
+  }
+
+  if (phase === "synthesis" && !sentTypes.has("response")) {
+    return textResult({
+      error: "Cannot enter synthesis phase without sending a response first",
+      hint: "Use send_task with type 'response' before signaling 'synthesis'",
     });
   }
 

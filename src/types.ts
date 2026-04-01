@@ -9,7 +9,7 @@
 
 // --- Phase lifecycle ---
 
-export const PHASES = ["registered", "briefing", "review", "dialogue", "complete"] as const;
+export const PHASES = ["registered", "briefing", "review", "dialogue", "synthesis", "complete"] as const;
 export type Phase = typeof PHASES[number];
 
 // --- Agent identity ---
@@ -71,6 +71,25 @@ export interface Finding {
   sourceAnalog?: string;
 }
 
+// --- Synthesis ---
+
+export interface SynthesisAccepted {
+  findingId: string;
+  action: string;
+}
+
+export interface SynthesisRejected {
+  findingId: string;
+  reason: string;
+}
+
+export interface Synthesis {
+  agentId: string;
+  project: string;
+  accepted: SynthesisAccepted[];
+  rejected: SynthesisRejected[];
+}
+
 // --- Responses ---
 
 export interface FindingResponse {
@@ -82,14 +101,14 @@ export interface FindingResponse {
 
 // --- Task envelope ---
 
-export type TaskType = "briefing" | "review_bundle" | "question" | "response";
+export type TaskType = "briefing" | "review_bundle" | "question" | "response" | "synthesis";
 
 export interface Task {
   id: string;
   from: string;
   to: string;
   type: TaskType;
-  payload: Briefing | Finding[] | Question | FindingResponse[];
+  payload: Briefing | Finding[] | Question | FindingResponse[] | Synthesis;
   createdAt: number;
 }
 
