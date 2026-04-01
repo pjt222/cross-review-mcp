@@ -229,7 +229,7 @@ export function handleSignalPhase(
     });
   }
 
-  if (state.agents.size < 2) {
+  if (state.agents.size < 2 && phase !== "complete") {
     return textResult({
       error: "Cannot advance phase with fewer than 2 registered agents",
       registered: state.agents.size,
@@ -287,6 +287,32 @@ export async function handleWaitForPhase(
     currentPhase: state.phases.get(peerId),
     timedOut: !result.reached,
   });
+}
+
+export function handleDeregister(
+  state: BrokerState,
+  args: { agentId: string },
+): ToolResult {
+  const { agentId } = args;
+
+  if (!state.agents.has(agentId)) {
+    return textResult({ error: "Agent not registered", agentId });
+  }
+
+  // Resolve any pending waiters targeting this agent with reached: false
+  const waiters = state.phaseWaiters.get(agentId) ?? [];
+  for (const waiter of waiters) {
+    waiter.resolve({ reached: false });
+  }
+
+  // Remove from all state maps
+  state.agents.delete(agentId);
+  state.phases.delete(agentId);
+  state.taskQueues.delete(agentId);
+  state.phaseWaiters.delete(agentId);
+  state.sentTaskTypes.delete(agentId);
+
+  return textResult({ deregistered: true, agentId });
 }
 
 export function handleGetStatus(state: BrokerState): ToolResult {

@@ -31,6 +31,7 @@ import {
   handleSignalPhase,
   handleWaitForPhase,
   handleGetStatus,
+  handleDeregister,
 } from "./broker.js";
 
 // --- Configuration ---
@@ -207,6 +208,20 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
     "Get the current broker state: registered agents, their phases, and pending task counts.",
     {},
     async () => handleGetStatus(brokerState)
+  );
+
+  // Tool: deregister
+  server.tool(
+    "deregister",
+    "Remove this agent from the broker. Cleans up queues and resolves pending waiters.",
+    {
+      agentId: z.string().describe("Your agent ID"),
+    },
+    async (args) => {
+      const result = handleDeregister(brokerState, args);
+      logEvent({ event: "deregister", agentId: args.agentId });
+      return result;
+    }
   );
 
   // Protocol resource
