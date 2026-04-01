@@ -164,7 +164,7 @@ server.tool(
       };
     }
 
-    // Enforce minimum bandwidth for review bundles (QSG: m ≥ 3)
+    // Enforce minimum bandwidth for review bundles (QSG: Γ_h = mN·h/α)
     if (type === "review_bundle") {
       if (!Array.isArray(parsedPayload) || parsedPayload.length < MIN_BANDWIDTH) {
         return {
@@ -174,6 +174,21 @@ server.tool(
               error: `Review bundles must contain at least ${MIN_BANDWIDTH} findings (QSG bandwidth constraint: Γ_h = mN·h/α > 1)`,
               received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
               required: MIN_BANDWIDTH,
+            }),
+          }],
+        };
+      }
+    }
+
+    // Enforce that responses address all received findings
+    if (type === "response") {
+      if (!Array.isArray(parsedPayload) || parsedPayload.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: "Response must contain at least one FindingResponse",
+              received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
             }),
           }],
         };
