@@ -107,6 +107,8 @@ export interface BrokerState {
   phases: Map<string, Phase>;
   taskQueues: Map<string, Task[]>;
   phaseWaiters: Map<string, PhaseWaiter[]>;
+  /** Track task types each agent has sent, for phase precondition checks. */
+  sentTaskTypes: Map<string, Set<TaskType>>;
 }
 
 export interface PhaseWaiter {

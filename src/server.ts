@@ -45,6 +45,7 @@ const state: BrokerState = {
   phases: new Map(),
   taskQueues: new Map(),
   phaseWaiters: new Map(),
+  sentTaskTypes: new Map(),
 };
 
 function generateId(): string {
@@ -101,6 +102,7 @@ server.tool(
     state.phases.set(agentId, "registered");
     state.taskQueues.set(agentId, []);
     state.phaseWaiters.set(agentId, []);
+    state.sentTaskTypes.set(agentId, new Set());
     logEvent({ event: "register", agentId, project });
 
     const peerCount = state.agents.size;
@@ -190,6 +192,9 @@ server.tool(
     queue.push(task);
     state.taskQueues.set(to, queue);
 
+    // Track sent task types for phase precondition checks
+    state.sentTaskTypes.get(from)?.add(type);
+
     // Log review bundles and verdict responses
     if (type === "review_bundle" && Array.isArray(parsedPayload)) {
       const categories = parsedPayload.map((f: Record<string, unknown>) => f.category).filter(Boolean);
@@ -253,7 +258,7 @@ server.tool(
   "Signal that this agent has reached a protocol phase. Phases: registered → briefing → review → dialogue → complete.",
   {
     agentId: z.string().describe("Your agent ID"),
-    phase: z.enum(["registered", "briefing", "review", "dialogue", "complete"]).describe("Phase reached"),
+    phase: z.enum(["briefing", "review", "dialogue", "complete"]).describe("Phase reached"),
   },
   async ({ agentId, phase }) => {
     if (!state.agents.has(agentId)) {
@@ -276,6 +281,37 @@ server.tool(
             requested: phase,
           }),
         }],
+      };
+    }
+
+    // Phase precondition checks
+    const sentTypes = state.sentTaskTypes.get(agentId) ?? new Set();
+
+    if (phase === "review" && !sentTypes.has("briefing")) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          error: "Cannot enter review phase without sending a briefing first",
+          hint: "Use send_task with type 'briefing' before signaling 'review'",
+        }) }],
+      };
+    }
+
+    if (phase === "dialogue" && !sentTypes.has("review_bundle")) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          error: "Cannot enter dialogue phase without sending a review bundle first",
+          hint: "Use send_task with type 'review_bundle' before signaling 'dialogue'",
+        }) }],
+      };
+    }
+
+    if (state.agents.size < 2) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          error: "Cannot advance phase with fewer than 2 registered agents",
+          registered: state.agents.size,
+          required: 2,
+        }) }],
       };
     }
 
