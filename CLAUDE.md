@@ -31,12 +31,64 @@ The drift-selection parameter Γ_h = mN·h/α determines whether multi-agent agr
 
 With N=2 and m ≥ 5, the system stays safely in the selection regime (Γ_h ≈ 1.67).
 
+## CLI Orchestrator
+
+Headless conversation driver using tmux + WezTerm. Launches Claude Code instances with heart-pulsed continuous review cycles.
+
+### Modes
+
+| Mode | Agents | Topology |
+|------|--------|----------|
+| `monologue` | 1 | Self-review loop |
+| `dialogue` | 2 | Cross-review pair (standard QSG) |
+| `trialogue` | 3 | Ring review (A→B→C→A) |
+| `conference` | N | Round-robin ring mesh |
+
+### Usage
+
+```bash
+# Single self-review
+npm run monologue -- ./my-project
+
+# Standard cross-review pair
+npm run dialogue -- ./project-a ./project-b
+
+# Three-way ring review
+npm run trialogue -- ./proj-a ./proj-b ./proj-c
+
+# N-way conference
+npm run conference -- ./p1 ./p2 ./p3 ./p4
+
+# With options
+tsx src/cli.ts dialogue ./proj-a ./proj-b --pulse 60 --rounds 5 --headless
+```
+
+### Options
+
+- `--port <n>` — Broker port (default: 3749)
+- `--pulse <secs>` — Heartbeat interval (default: 45s)
+- `--rounds <n>` — Review rounds, 0=infinite (default: 0)
+- `--headless` — WezTerm headless mode (no GUI)
+- `--session <name>` — tmux session name
+- `--prompt <text>` — Custom prompt for all agents
+
+### Heart Pulse
+
+The orchestrator monitors each agent's tmux pane for activity. Idle agents receive escalating nudges: light (continue), medium (check status), strong (full mission reminder). The pulse also monitors broker health and detects completion.
+
+### Prerequisites
+
+- `tmux` — session/pane management (required)
+- `claude` — Claude Code CLI (required)
+- `wezterm` — terminal host (optional, enhances headless mode)
+
 ## Commands
 
 ```bash
 npm start       # Start broker on port 3749 (or CROSS_REVIEW_PORT)
 npm run dev     # Start with file watching
 npm test        # Run test suite
+npm run cli     # Run CLI orchestrator (pass args after --)
 ```
 
 ## Files
@@ -44,3 +96,4 @@ npm test        # Run test suite
 - `src/server.ts` — HTTP server, per-session McpServer factory, transport wiring
 - `src/broker.ts` — Pure handler functions (extracted for testability)
 - `src/types.ts` — TypeScript type definitions and QSG constants
+- `src/cli.ts` — CLI orchestrator (tmux/WezTerm, heart pulse, mode dispatch)
