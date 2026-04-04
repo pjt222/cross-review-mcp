@@ -69,8 +69,19 @@ tsx src/cli.ts dialogue ./proj-a ./proj-b --pulse 60 --rounds 5 --headless
 - `--pulse <secs>` — Heartbeat interval (default: 45s)
 - `--rounds <n>` — Review rounds, 0=infinite (default: 0)
 - `--headless` — WezTerm headless mode (no GUI)
+- `--tui` — Enable viridis TUI dashboard (full-screen alternate buffer)
 - `--session <name>` — tmux session name
 - `--prompt <text>` — Custom prompt for all agents
+
+### TUI Dashboard
+
+`--tui` activates a full-screen terminal interface using the viridis color scheme (indigo → teal → green → yellow). Displays:
+- Agent phase progression with viridis gradient bars
+- Ring topology visualization with phase-colored nodes
+- Heartbeat sparkline (idle activity over time)
+- Live tmux pane preview for selected agent (j/k to navigate, tab to cycle)
+- Scrolling event log with color-coded levels
+- Broker health and session metadata
 
 ### Heart Pulse
 
@@ -97,3 +108,4 @@ npm run cli     # Run CLI orchestrator (pass args after --)
 - `src/broker.ts` — Pure handler functions (extracted for testability)
 - `src/types.ts` — TypeScript type definitions and QSG constants
 - `src/cli.ts` — CLI orchestrator (tmux/WezTerm, heart pulse, mode dispatch)
+- `src/tui.ts` — Viridis TUI dashboard (alternate screen, ANSI rendering)

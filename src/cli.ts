@@ -17,6 +17,7 @@ import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { resolve, basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomBytes } from "node:crypto";
+import { Tui, createTuiState, type TuiState } from "./tui.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ interface CliOptions {
   pulse: number;       // heartbeat interval in seconds
   rounds: number;      // review rounds before stopping (0 = infinite)
   headless: boolean;   // run wezterm in headless mode
+  tui: boolean;        // enable TUI dashboard
   sessionName: string;
   prompt?: string;     // optional custom prompt injected into each agent
 }
@@ -115,16 +117,17 @@ Options:
   --pulse <secs>    Heartbeat interval (default: ${DEFAULT_PULSE}s)
   --rounds <n>      Review rounds, 0 = infinite (default: ${DEFAULT_ROUNDS})
   --headless        Launch WezTerm in headless mode (no GUI)
+  --tui             Enable viridis TUI dashboard
   --session <name>  tmux session name (default: auto-generated)
   --prompt <text>   Custom prompt injected into each agent
   --help            Show this help
 
 Examples:
   cross-review monologue ./my-project
-  cross-review dialogue ./project-a ./project-b
+  cross-review dialogue ./project-a ./project-b --tui
   cross-review trialogue ./proj-a ./proj-b ./proj-c
   cross-review conference ./p1 ./p2 ./p3 ./p4 --rounds 3 --pulse 60
-  cross-review dialogue ./proj-a ./proj-b --headless
+  cross-review dialogue ./proj-a ./proj-b --headless --tui
 `);
   process.exit(0);
 }
@@ -146,6 +149,7 @@ function parseArgs(argv: string[]): CliOptions {
   let pulse = DEFAULT_PULSE;
   let rounds = DEFAULT_ROUNDS;
   let headless = false;
+  let tui = false;
   let sessionName = `${SESSION_PREFIX}-${shortId()}`;
   let prompt: string | undefined;
 
@@ -164,6 +168,9 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case "--headless":
         headless = true;
+        break;
+      case "--tui":
+        tui = true;
         break;
       case "--session":
         sessionName = args[++i];
@@ -199,7 +206,7 @@ function parseArgs(argv: string[]): CliOptions {
     process.exit(1);
   }
 
-  return { mode, projects, port, pulse, rounds, headless, sessionName, prompt };
+  return { mode, projects, port, pulse, rounds, headless, tui, sessionName, prompt };
 }
 
 // ── Agent topology ─────────────────────────────────────────────────────
@@ -374,7 +381,17 @@ function getNudgePrompt(agent: AgentSpec, allAgents: AgentSpec[], opts: CliOptio
   ].join("\n");
 }
 
-async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions): Promise<void> {
+function detectPhase(content: string): string | undefined {
+  const phases = ["complete", "synthesis", "dialogue", "review", "briefing", "registered"];
+  for (const p of phases) {
+    if (content.includes(`"${p}"`) || content.includes(`phase: ${p}`) || content.includes(`"phase":"${p}"`)) {
+      return p;
+    }
+  }
+  return undefined;
+}
+
+async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions, tui?: Tui, tuiState?: TuiState): Promise<void> {
   const state: PulseState = {
     round: 0,
     agentActivity: new Map(
@@ -384,30 +401,54 @@ async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions): Promise<voi
 
   const monitorTarget = `${opts.sessionName}:monitor`;
 
-  log("Heart pulse started", `interval=${opts.pulse}s, rounds=${opts.rounds || "∞"}`);
+  const emit = (level: "info" | "warn" | "pulse" | "nudge" | "phase" | "done", msg: string, agentId?: string) => {
+    if (tui && tuiState) {
+      tui.addEvent({ ts: Date.now(), level, agent: agentId, message: msg });
+    } else {
+      log(agentId ? `${agentId}: ${msg}` : msg);
+    }
+  };
+
+  emit("info", `Heart pulse started — interval=${opts.pulse}s, rounds=${opts.rounds || "∞"}`);
 
   while (true) {
     await sleep(opts.pulse * 1000);
     state.round++;
 
+    if (tuiState) tuiState.currentRound = state.round;
+
     // Check if tmux session still exists
     try {
       tmux("has-session", "-t", opts.sessionName);
     } catch {
-      log("tmux session gone, stopping heartbeat");
+      emit("warn", "tmux session gone, stopping heartbeat");
       break;
     }
 
     // Check broker health
+    let brokerHealthy = false;
+    let brokerAgentCount = 0;
     try {
       const health = execSync(
         `curl -sf http://localhost:${opts.port}/health`,
         { encoding: "utf-8", timeout: 5_000 }
       );
       const status = JSON.parse(health);
-      tmuxSend(monitorTarget, `echo "[pulse ${state.round}] broker: ${status.agentCount} agents"`);
+      brokerHealthy = true;
+      brokerAgentCount = status.agentCount ?? 0;
+      if (!tui) {
+        tmuxSend(monitorTarget, `echo "[pulse ${state.round}] broker: ${status.agentCount} agents"`);
+      }
     } catch {
-      tmuxSend(monitorTarget, `echo "[pulse ${state.round}] broker: unreachable"`);
+      if (!tui) {
+        tmuxSend(monitorTarget, `echo "[pulse ${state.round}] broker: unreachable"`);
+      }
+    }
+
+    if (tuiState) {
+      tuiState.broker.healthy = brokerHealthy;
+      tuiState.broker.agentCount = brokerAgentCount;
+      tuiState.broker.uptime = Math.floor((Date.now() - tuiState.startedAt) / 1000);
     }
 
     // Pulse each agent
@@ -424,23 +465,42 @@ async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions): Promise<voi
         activity.lastHash = hash;
       }
 
+      // Update TUI agent state
+      if (tuiState) {
+        const tuiAgent = tuiState.agents.find(a => a.id === agent.id);
+        if (tuiAgent) {
+          tuiAgent.idleCycles = activity.idleCycles;
+          tuiAgent.paneContent = content;
+          tuiAgent.lastActivity = new Date().toISOString().slice(11, 19);
+          const detectedPhase = detectPhase(content);
+          if (detectedPhase && detectedPhase !== tuiAgent.phase) {
+            emit("phase", `${tuiAgent.phase} → ${detectedPhase}`, agent.id);
+            tuiAgent.phase = detectedPhase;
+          }
+        }
+      }
+
       // Only nudge if idle
       if (activity.idleCycles >= 2) {
-        log(`Nudging ${agent.id}`, `idle=${activity.idleCycles} cycles`);
+        emit("nudge", `idle ${activity.idleCycles} cycles, nudging`, agent.id);
         const nudge = getNudgePrompt(agent, agents, opts, state);
-        // Send nudge as a new claude prompt
         tmuxSend(target, nudge);
       }
 
-      tmuxSend(
-        monitorTarget,
-        `echo "[pulse ${state.round}] ${agent.id}: idle=${activity.idleCycles}"`
-      );
+      if (!tui) {
+        tmuxSend(
+          monitorTarget,
+          `echo "[pulse ${state.round}] ${agent.id}: idle=${activity.idleCycles}"`
+        );
+      }
     }
+
+    emit("pulse", `round ${state.round} complete`);
+    if (tui) tui.recordPulse();
 
     // Check round limit
     if (opts.rounds > 0 && state.round >= opts.rounds) {
-      log(`Reached round limit (${opts.rounds}), signaling completion`);
+      emit("done", `Reached round limit (${opts.rounds}), signaling completion`);
       for (const agent of agents) {
         const target = `${opts.sessionName}:${agent.id}`;
         tmuxSend(target, "Signal 'complete' phase and wrap up your review. Produce a final synthesis if you haven't already.");
@@ -459,7 +519,7 @@ async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions): Promise<voi
       }
     }
     if (allComplete && state.round > 3) {
-      log("All agents complete, stopping heartbeat");
+      emit("done", "All agents complete");
       break;
     }
   }
@@ -527,7 +587,26 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`
+  // Set up TUI or print banner
+  let tui: Tui | undefined;
+  let tuiState: TuiState | undefined;
+
+  if (opts.tui) {
+    tuiState = createTuiState({
+      mode: opts.mode,
+      sessionName: opts.sessionName,
+      port: opts.port,
+      pulse: opts.pulse,
+      rounds: opts.rounds,
+      agents: agents.map(a => ({
+        id: a.id,
+        project: a.project,
+        reviewTarget: a.reviewTarget,
+      })),
+    });
+    tui = new Tui(tuiState);
+  } else {
+    console.log(`
 ┌─────────────────────────────────────────┐
 │         Cross-Review Orchestrator       │
 ├─────────────────────────────────────────┤
@@ -540,9 +619,10 @@ async function main(): Promise<void> {
 └─────────────────────────────────────────┘
 `);
 
-  for (const agent of agents) {
-    const target = agents.find(a => a.id === agent.reviewTarget);
-    log(`${agent.id}: ${basename(agent.project)} → reviews ${target ? basename(target.project) : "self"}`);
+    for (const agent of agents) {
+      const target = agents.find(a => a.id === agent.reviewTarget);
+      log(`${agent.id}: ${basename(agent.project)} → reviews ${target ? basename(target.project) : "self"}`);
+    }
   }
 
   // Set up signal handlers
@@ -550,6 +630,7 @@ async function main(): Promise<void> {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (tui) tui.stop();
     cleanup(opts.sessionName);
     process.exit(0);
   };
@@ -563,14 +644,22 @@ async function main(): Promise<void> {
   // Optionally launch WezTerm
   launchWithWezterm(opts);
 
+  // Start TUI after tmux session is created
+  if (tui) {
+    tui.addEvent({ ts: Date.now(), level: "info", message: "tmux session created" });
+    tui.start();
+  }
+
   // Start broker
   log("Starting MCP broker");
+  if (tui) tui.addEvent({ ts: Date.now(), level: "info", message: "Starting broker..." });
   startBroker(opts);
   await sleep(2000); // Let broker initialize
 
   // Start agents (staggered to avoid registration race)
   for (const agent of agents) {
     log(`Initializing ${agent.id} in ${basename(agent.project)}`);
+    if (tui) tui.addEvent({ ts: Date.now(), level: "info", agent: agent.id, message: `initializing in ${basename(agent.project)}` });
     startAgent(agent, agents, opts);
     await sleep(1000);
   }
@@ -579,13 +668,22 @@ async function main(): Promise<void> {
   await sleep(2000);
   for (const agent of agents) {
     log(`Launching conversation for ${agent.id}`);
+    if (tui) tui.addEvent({ ts: Date.now(), level: "info", agent: agent.id, message: "launching conversation" });
     launchAgentConversation(agent, agents, opts);
     await sleep(1500); // Stagger launches to reduce broker contention
   }
 
   // Enter heartbeat loop
-  log("All agents launched, entering heartbeat loop");
-  await heartbeatLoop(agents, opts);
+  if (!tui) log("All agents launched, entering heartbeat loop");
+  if (tui) tui.addEvent({ ts: Date.now(), level: "info", message: "All agents launched — entering heartbeat loop" });
+  await heartbeatLoop(agents, opts, tui, tuiState);
+
+  if (tui) {
+    tui.addEvent({ ts: Date.now(), level: "done", message: "Orchestration complete" });
+    // Keep TUI up for a moment so user sees the final state
+    await sleep(3000);
+    tui.stop();
+  }
 
   log("Orchestration complete");
   console.log(`\nSession "${opts.sessionName}" is still running.`);
