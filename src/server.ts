@@ -4,12 +4,15 @@
  *
  * An MCP server that enables two Claude Code instances to review each other's
  * projects through structured artifact exchange. Design informed by QSG scaling
- * laws (Tanaka, arXiv:2603.24676):
+ * laws (Tanaka, arXiv:2603.24676) and EvoSkills co-evolutionary verification
+ * (Zhang et al., arXiv:2604.01687):
  *
- *   Γ_h = mN·h/α  — drift-selection parameter
+ *   Γ_h = mN·h/α  — drift-selection parameter (QSG)
+ *   Skill Generator ↔ Surrogate Verifier co-evolution (EvoSkills)
  *
- * High bandwidth (m ≥ 3 findings per bundle) pushes the system into the
+ * High bandwidth (m ≥ 5 findings per bundle) pushes the system into the
  * selection regime where genuine insights dominate over random drift.
+ * Skill packages evolve through iterative refinement capped at 5 rounds.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -22,6 +25,8 @@ import {
   type BrokerState,
   type FindingResponse,
   MIN_BANDWIDTH,
+  MAX_EVOLUTION_ROUNDS,
+  MIN_SKILL_ARTIFACTS,
 } from "./types.js";
 import {
   handleRegister,
@@ -32,6 +37,7 @@ import {
   handleWaitForPhase,
   handleGetStatus,
   handleDeregister,
+  handleGetSkillStatus,
 } from "./broker.js";
 import type { MemPalaceState } from "./types.js";
 import {
@@ -65,6 +71,7 @@ const state: BrokerState = {
   taskQueues: new Map(),
   phaseWaiters: new Map(),
   sentTaskTypes: new Map(),
+  skillEvolution: new Map(),
 };
 
 const memPalaceState: MemPalaceState = createMemPalaceState();
@@ -80,12 +87,28 @@ Central formula: **Γ_h = mN·h/α** where m=findings per bundle, N=agents, h=bi
 - |Γ_h| ≫ 1 → genuine insights amplified (selection regime)
 - Design: m ≥ ${MIN_BANDWIDTH} keeps Γ_h ≈ 1.67 in the selection regime
 
+## EvoSkills Integration (Zhang et al., 2026, arXiv:2604.01687)
+Agents can exchange **skill packages** — multi-file artifact bundles that encode
+reusable task strategies. The two-agent cross-review topology maps onto the
+EvoSkills co-evolutionary loop:
+- **Agent A** acts as Skill Generator, submitting a skill_bundle to Agent B
+- **Agent B** acts as Surrogate Verifier, returning a skill_verification with score and feedback
+- Agent A refines the skill using feedback (up to ${MAX_EVOLUTION_ROUNDS} rounds)
+- Convergence is detected when consecutive scores stabilize
+
+Constraints:
+- Skill packages must contain ≥ ${MIN_SKILL_ARTIFACTS} artifacts (multi-file requirement)
+- Evolution is capped at ${MAX_EVOLUTION_ROUNDS} rounds (empirically sufficient per Zhang et al.)
+- Skills evolved by one agent transfer effectively to others (cross-model portability)
+
 ## Phases (sequential, enforced by broker)
 1. **briefing** — Read own codebase, produce structured Briefing artifact, send to peer. Both agents do this in parallel.
 2. **review** — Wait for peer briefing (wait_for_phase), read peer's actual code, send Finding[] bundle (m ≥ ${MIN_BANDWIDTH}). Must have sent a briefing first.
 3. **dialogue** — Read findings about own project, respond with FindingResponse[] verdicts. Must have sent a review_bundle first.
 4. **synthesis** — Produce a Synthesis artifact: accepted findings with planned actions, rejected findings with reasons. Must have sent a response first. Each agent synthesizes what it learned about its own project.
 5. **complete** — All findings processed and synthesized. Signal completion.
+
+Skill exchange (skill_bundle / skill_verification) can happen during any phase after briefing.
 
 ## Finding Categories
 pattern_transfer, missing_practice, inconsistency, simplification, bug_risk, documentation_gap
@@ -123,11 +146,11 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
   // Tool: send_task
   server.tool(
     "send_task",
-    "Send a task (briefing, review bundle, question, or response) to a peer agent. Review bundles must contain at least 5 findings (QSG bandwidth constraint: Γ_h ≈ 1.67).",
+    "Send a task to a peer agent. Review bundles must contain ≥ 5 findings (QSG). Skill bundles must contain ≥ 2 artifacts (EvoSkills) and evolve for up to 5 rounds.",
     {
       from: z.string().describe("Your agent ID (the sender)"),
       to: z.string().describe("Target agent ID"),
-      type: z.enum(["briefing", "review_bundle", "question", "response", "synthesis"]).describe("Task type"),
+      type: z.enum(["briefing", "review_bundle", "question", "response", "synthesis", "skill_bundle", "skill_verification"]).describe("Task type"),
       payload: z.string().describe("JSON-encoded payload matching the task type schema"),
     },
     async (args) => {
@@ -150,6 +173,14 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
               logEvent({ event: "verdict", taskId: parsed.taskId, from: args.from, to: args.to, findingId: response.findingId, verdict: response.verdict });
             }
           }
+        } else if (args.type === "skill_bundle") {
+          let parsedPayload: Record<string, unknown>;
+          try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = {}; }
+          logEvent({ event: "skill_bundle", taskId: parsed.taskId, from: args.from, to: args.to, skillId: parsedPayload.skillId, evolutionRound: parsedPayload.evolutionRound, artifactCount: Array.isArray(parsedPayload.artifacts) ? parsedPayload.artifacts.length : 0 });
+        } else if (args.type === "skill_verification") {
+          let parsedPayload: Record<string, unknown>;
+          try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = {}; }
+          logEvent({ event: "skill_verification", taskId: parsed.taskId, from: args.from, to: args.to, skillId: parsedPayload.skillId, pass: parsedPayload.pass, score: parsedPayload.score });
         }
       }
 
@@ -219,6 +250,16 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
     "Get the current broker state: registered agents, their phases, and pending task counts.",
     {},
     async () => handleGetStatus(brokerState)
+  );
+
+  // Tool: get_skill_status (EvoSkills)
+  server.tool(
+    "get_skill_status",
+    "Get the skill evolution state for an agent: current round, convergence status, score history.",
+    {
+      agentId: z.string().describe("The agent ID to query skill evolution for"),
+    },
+    async (args) => handleGetSkillStatus(brokerState, args)
   );
 
   // Tool: deregister
@@ -377,6 +418,7 @@ export async function startTestServer(): Promise<{ url: string; close: () => Pro
     taskQueues: new Map(),
     phaseWaiters: new Map(),
     sentTaskTypes: new Map(),
+    skillEvolution: new Map(),
   };
   const testTransports = new Map<string, StreamableHTTPServerTransport>();
   const testMpState = createMemPalaceState();

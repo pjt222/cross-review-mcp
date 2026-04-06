@@ -11,8 +11,17 @@ import type {
   FindingResponse,
   Phase,
   PhaseWaiter,
+  SkillPackage,
+  SkillVerification,
+  SkillEvolutionState,
 } from "./types.js";
-import { PHASES, MIN_BANDWIDTH } from "./types.js";
+import {
+  PHASES,
+  MIN_BANDWIDTH,
+  MAX_EVOLUTION_ROUNDS,
+  MIN_SKILL_ARTIFACTS,
+  SKILL_CONVERGENCE_THRESHOLD,
+} from "./types.js";
 
 export interface ToolResult {
   [key: string]: unknown;
@@ -158,6 +167,65 @@ export function handleSendTask(
         error: "Response must contain at least one FindingResponse",
         received: receivedDescription,
       });
+    }
+  }
+
+  if (type === "skill_bundle") {
+    const pkg = parsedPayload as Partial<SkillPackage>;
+    if (!pkg.skillId || !pkg.name || !Array.isArray(pkg.artifacts)) {
+      return textResult({
+        error: "Skill bundle must include skillId, name, and artifacts array",
+      });
+    }
+    if (pkg.artifacts.length < MIN_SKILL_ARTIFACTS) {
+      return textResult({
+        error: `Skill packages must contain at least ${MIN_SKILL_ARTIFACTS} artifacts (EvoSkills multi-file constraint)`,
+        received: pkg.artifacts.length,
+        required: MIN_SKILL_ARTIFACTS,
+      });
+    }
+    const round = pkg.evolutionRound ?? 0;
+    if (round >= MAX_EVOLUTION_ROUNDS) {
+      return textResult({
+        error: `Skill has reached maximum evolution rounds (${MAX_EVOLUTION_ROUNDS})`,
+        currentRound: round,
+        maxRounds: MAX_EVOLUTION_ROUNDS,
+      });
+    }
+    // Initialize or update evolution state for the sender
+    const evoState = state.skillEvolution.get(from) ?? {
+      agentId: from,
+      currentRound: 0,
+      skillHistory: [],
+      converged: false,
+    };
+    evoState.currentRound = round;
+    state.skillEvolution.set(from, evoState);
+  }
+
+  if (type === "skill_verification") {
+    const ver = parsedPayload as Partial<SkillVerification>;
+    if (!ver.skillId || ver.pass === undefined || ver.score === undefined) {
+      return textResult({
+        error: "Skill verification must include skillId, pass, and score",
+      });
+    }
+    if (ver.score < 0 || ver.score > 1) {
+      return textResult({
+        error: "Verification score must be between 0 and 1",
+        received: ver.score,
+      });
+    }
+    // Update evolution state for the skill owner (the target agent)
+    const evoState = state.skillEvolution.get(to);
+    if (evoState) {
+      evoState.skillHistory.push({ skillId: ver.skillId, score: ver.score });
+      // Check convergence: last two scores within threshold
+      const history = evoState.skillHistory;
+      if (history.length >= 2) {
+        const delta = Math.abs(history[history.length - 1].score - history[history.length - 2].score);
+        evoState.converged = delta < SKILL_CONVERGENCE_THRESHOLD;
+      }
     }
   }
 
@@ -366,5 +434,40 @@ export function handleGetStatus(state: BrokerState): ToolResult {
     agents,
     minBandwidth: MIN_BANDWIDTH,
     qsgNote: `Γ_h = mN·h/α — keep m ≥ ${MIN_BANDWIDTH} to stay in selection regime`,
+  });
+}
+
+export function handleGetSkillStatus(
+  state: BrokerState,
+  args: { agentId: string },
+): ToolResult {
+  const { agentId } = args;
+
+  if (!state.agents.has(agentId)) {
+    return textResult({ error: "Agent not registered", agentId });
+  }
+
+  const evoState = state.skillEvolution.get(agentId);
+  if (!evoState) {
+    return textResult({
+      agentId,
+      hasSkillEvolution: false,
+      hint: "Submit a skill_bundle via send_task to begin co-evolutionary skill refinement",
+    });
+  }
+
+  const latestScore = evoState.skillHistory.length > 0
+    ? evoState.skillHistory[evoState.skillHistory.length - 1].score
+    : null;
+
+  return textResult({
+    agentId,
+    hasSkillEvolution: true,
+    currentRound: evoState.currentRound,
+    maxRounds: MAX_EVOLUTION_ROUNDS,
+    converged: evoState.converged,
+    latestScore,
+    totalIterations: evoState.skillHistory.length,
+    history: evoState.skillHistory,
   });
 }
