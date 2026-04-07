@@ -146,3 +146,33 @@ export interface PhaseWaiter {
  * without raising this constant degrades selection pressure.
  */
 export const MIN_BANDWIDTH = 5;
+
+// --- MemPalace integration ---
+
+export interface MemPalaceConfig {
+  /** Base URL of the MemPalace MCP server (e.g., "http://localhost:5173/mcp") */
+  url: string;
+  /** Palace path for storage (defaults to "~/.mempalace/palace") */
+  palacePath?: string;
+  /** Wing name for cross-review artifacts (defaults to "cross-review") */
+  wing?: string;
+}
+
+export type MemPalaceArtifactKind = "briefing" | "finding" | "response" | "synthesis";
+
+export interface MemPalaceEntry {
+  id: string;
+  agentId: string;
+  project: string;
+  kind: MemPalaceArtifactKind;
+  phase: Phase;
+  content: string;
+  storedAt: number;
+}
+
+export interface MemPalaceState {
+  enabled: boolean;
+  config: MemPalaceConfig | null;
+  /** Local buffer of stored entries (for status reporting) */
+  entries: MemPalaceEntry[];
+}

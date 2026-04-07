@@ -33,6 +33,14 @@ import {
   handleGetStatus,
   handleDeregister,
 } from "./broker.js";
+import type { MemPalaceState } from "./types.js";
+import {
+  createMemPalaceState,
+  handleMemPalaceConfigure,
+  handleMemPalaceStore,
+  handleMemPalaceSearch,
+  handleMemPalaceStatus,
+} from "./mempalace.js";
 
 // --- Configuration ---
 
@@ -58,6 +66,8 @@ const state: BrokerState = {
   phaseWaiters: new Map(),
   sentTaskTypes: new Map(),
 };
+
+const memPalaceState: MemPalaceState = createMemPalaceState();
 
 // --- Protocol resource document ---
 
@@ -88,7 +98,7 @@ pattern_transfer, missing_practice, inconsistency, simplification, bug_risk, doc
 
 // --- Factory: create a new McpServer with all tools registered ---
 
-function createBrokerServer(brokerState: BrokerState): McpServer {
+function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): McpServer {
   const server = new McpServer({
     name: "cross-review-mcp",
     version: "1.0.0",
@@ -225,6 +235,62 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
     }
   );
 
+  // Tool: mempalace_configure
+  server.tool(
+    "mempalace_configure",
+    "Configure MemPalace integration for persistent artifact storage. See https://github.com/mila-jovovich/mempalace",
+    {
+      url: z.string().describe("MemPalace server URL (e.g., 'http://localhost:5173/mcp')"),
+      palacePath: z.string().optional().describe("Palace path (default: ~/.mempalace/palace)"),
+      wing: z.string().optional().describe("Wing name for cross-review artifacts (default: 'cross-review')"),
+    },
+    async (args) => {
+      const result = handleMemPalaceConfigure(mpState, args);
+      logEvent({ event: "mempalace_configure", url: args.url, wing: args.wing ?? "cross-review" });
+      return result;
+    }
+  );
+
+  // Tool: mempalace_store
+  server.tool(
+    "mempalace_store",
+    "Store a cross-review artifact in MemPalace for long-term memory. Artifacts are organized by project (room) within the cross-review wing.",
+    {
+      agentId: z.string().describe("Your agent ID"),
+      kind: z.enum(["briefing", "finding", "response", "synthesis"]).describe("Artifact type to store"),
+      payload: z.string().describe("JSON-encoded artifact content"),
+    },
+    async (args) => {
+      const result = handleMemPalaceStore(mpState, brokerState, args);
+      const parsed = JSON.parse(result.content[0].text);
+      if (parsed.stored) {
+        logEvent({ event: "mempalace_store", entryId: parsed.entryId, agentId: args.agentId, kind: args.kind });
+      }
+      return result;
+    }
+  );
+
+  // Tool: mempalace_search
+  server.tool(
+    "mempalace_search",
+    "Search stored cross-review artifacts in MemPalace. Filter by artifact kind and/or project.",
+    {
+      query: z.string().describe("Search query string"),
+      kind: z.enum(["briefing", "finding", "response", "synthesis"]).optional().describe("Filter by artifact type"),
+      project: z.string().optional().describe("Filter by project name"),
+      limit: z.number().optional().describe("Max results to return (default: 10)"),
+    },
+    async (args) => handleMemPalaceSearch(mpState, args)
+  );
+
+  // Tool: mempalace_status
+  server.tool(
+    "mempalace_status",
+    "Get MemPalace integration status: configuration, entry counts by kind and project.",
+    {},
+    async () => handleMemPalaceStatus(mpState)
+  );
+
   // Protocol resource
   server.resource(
     "protocol",
@@ -247,6 +313,7 @@ function createBrokerServer(brokerState: BrokerState): McpServer {
 function createHttpHandler(
   brokerState: BrokerState,
   transportMap: Map<string, StreamableHTTPServerTransport>,
+  mpState: MemPalaceState,
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async function(req, res) {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -272,7 +339,7 @@ function createHttpHandler(
         transport = transportMap.get(sessionId)!;
       } else {
         transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-        const mcpServer = createBrokerServer(brokerState);
+        const mcpServer = createBrokerServer(brokerState, mpState);
         await mcpServer.connect(transport);
 
         transport.onclose = () => {
@@ -302,7 +369,7 @@ function createHttpHandler(
 // --- Module-level handler (uses shared state) ---
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
-const handleHttpRequest = createHttpHandler(state, transports);
+const handleHttpRequest = createHttpHandler(state, transports, memPalaceState);
 
 // --- Test helper: start an isolated server on a random port ---
 
@@ -315,7 +382,8 @@ export async function startTestServer(): Promise<{ url: string; close: () => Pro
     sentTaskTypes: new Map(),
   };
   const testTransports = new Map<string, StreamableHTTPServerTransport>();
-  const handler = createHttpHandler(testState, testTransports);
+  const testMpState = createMemPalaceState();
+  const handler = createHttpHandler(testState, testTransports, testMpState);
 
   const httpServer = createServer((req, res) => {
     handler(req, res).catch(() => {
