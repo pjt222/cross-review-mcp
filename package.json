@@ -3,9 +3,17 @@
   "version": "1.0.0",
   "description": "",
   "main": "src/server.ts",
+  "bin": {
+    "cross-review": "src/cli.ts"
+  },
   "scripts": {
     "start": "tsx src/server.ts",
     "dev": "tsx --watch src/server.ts",
+    "cli": "tsx src/cli.ts",
+    "monologue": "tsx src/cli.ts monologue",
+    "dialogue": "tsx src/cli.ts dialogue",
+    "trialogue": "tsx src/cli.ts trialogue",
+    "conference": "tsx src/cli.ts conference",
     "test": "vitest run",
     "test:watch": "vitest"
   },
