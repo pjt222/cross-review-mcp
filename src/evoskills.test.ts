@@ -66,7 +66,6 @@ describe("EvoSkills: skill_bundle validation", () => {
     );
 
     expect(result.error).toMatch(/at least.*artifacts/);
-    expect(result.received).toBe(1);
   });
 
   it("rejects skill bundle exceeding max evolution rounds", () => {

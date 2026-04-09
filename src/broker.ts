@@ -8,21 +8,18 @@
 import type {
   BrokerState,
   Task,
-  FindingResponse,
   Phase,
   PhaseWaiter,
   TaskWaiter,
-  SkillPackage,
-  SkillVerification,
   SkillEvolutionState,
 } from "./types.js";
 import {
   PHASES,
   MIN_BANDWIDTH,
   MAX_EVOLUTION_ROUNDS,
-  MIN_SKILL_ARTIFACTS,
   SKILL_CONVERGENCE_THRESHOLD,
 } from "./types.js";
+import { validatePayload } from "./schemas.js";
 
 export interface ToolResult {
   [key: string]: unknown;
@@ -37,18 +34,6 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Unwrap single-key wrapper objects: {findings:[...]} -> [...] */
-function unwrapArrayPayload(parsed: unknown): unknown {
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed && typeof parsed === "object") {
-    const keys = Object.keys(parsed as Record<string, unknown>);
-    if (keys.length === 1) {
-      const value = (parsed as Record<string, unknown>)[keys[0]];
-      if (Array.isArray(value)) return value;
-    }
-  }
-  return parsed;
-}
 
 export function notifyPhaseWaiters(state: BrokerState, agentId: string, phase: Phase): void {
   const waiters = state.phaseWaiters.get(agentId) ?? [];
@@ -78,36 +63,15 @@ export function notifyTaskWaiters(state: BrokerState, agentId: string): void {
   state.taskWaiters.set(agentId, []);
 }
 
-// --- EvoSkills validators (extracted for readability) ---
+// --- EvoSkills state updates (validation handled by schemas.ts) ---
 
-function validateSkillBundle(
+function updateSkillBundleState(
   state: BrokerState,
   senderId: string,
   parsedPayload: unknown,
 ): ToolResult | null {
-  const pkg = parsedPayload as Partial<SkillPackage>;
-  if (!pkg.skillId || !pkg.name || !Array.isArray(pkg.artifacts)) {
-    return textResult({
-      error: "Skill bundle must include skillId, name, and artifacts array",
-    });
-  }
-  if (pkg.artifacts.length < MIN_SKILL_ARTIFACTS) {
-    return textResult({
-      error: `Skill packages must contain at least ${MIN_SKILL_ARTIFACTS} artifacts (EvoSkills multi-file constraint)`,
-      received: pkg.artifacts.length,
-      required: MIN_SKILL_ARTIFACTS,
-    });
-  }
-  // Rounds are 0-indexed: round 0..MAX_EVOLUTION_ROUNDS-1 = MAX_EVOLUTION_ROUNDS total
+  const pkg = parsedPayload as { evolutionRound?: number };
   const round = pkg.evolutionRound ?? 0;
-  if (round >= MAX_EVOLUTION_ROUNDS) {
-    return textResult({
-      error: `Skill has reached maximum evolution rounds (${MAX_EVOLUTION_ROUNDS})`,
-      currentRound: round,
-      maxRounds: MAX_EVOLUTION_ROUNDS,
-    });
-  }
-  // Initialize or update evolution state for the sender (skill generator)
   const evoState = state.skillEvolution.get(senderId) ?? {
     agentId: senderId,
     currentRound: 0,
@@ -119,26 +83,12 @@ function validateSkillBundle(
   return null;
 }
 
-function validateSkillVerification(
+function updateSkillVerificationState(
   state: BrokerState,
   skillOwnerId: string,
   parsedPayload: unknown,
-): ToolResult | null {
-  const ver = parsedPayload as Partial<SkillVerification>;
-  if (!ver.skillId || ver.pass === undefined || ver.score === undefined) {
-    return textResult({
-      error: "Skill verification must include skillId, pass, and score",
-    });
-  }
-  if (ver.score < 0 || ver.score > 1) {
-    return textResult({
-      error: "Verification score must be between 0 and 1",
-      received: ver.score,
-    });
-  }
-  // Update evolution state for the skill owner (the target agent who sent the bundle)
-  // Initialize if not yet present (handles case where verification arrives before
-  // the owner's evolution state was visible to the verifier)
+): void {
+  const ver = parsedPayload as { skillId: string; score: number };
   const evoState = state.skillEvolution.get(skillOwnerId) ?? {
     agentId: skillOwnerId,
     currentRound: 0,
@@ -146,14 +96,12 @@ function validateSkillVerification(
     converged: false,
   };
   evoState.skillHistory.push({ skillId: ver.skillId, score: ver.score });
-  // Check convergence: last two scores within threshold
   const history = evoState.skillHistory;
   if (history.length >= 2) {
     const delta = Math.abs(history[history.length - 1].score - history[history.length - 2].score);
     evoState.converged = delta < SKILL_CONVERGENCE_THRESHOLD;
   }
   state.skillEvolution.set(skillOwnerId, evoState);
-  return null;
 }
 
 // --- Handlers ---
@@ -229,48 +177,25 @@ export function handleSendTask(
     return textResult({ error: "Invalid JSON payload" });
   }
 
-  // Unwrap single-key wrapper objects (e.g. {findings:[...]} -> [...])
-  if (type === "review_bundle" || type === "response") {
-    parsedPayload = unwrapArrayPayload(parsedPayload);
+  // Validate payload against type-specific schema
+  const validation = validatePayload(type, parsedPayload);
+  if (!validation.success) {
+    const errorResult: Record<string, unknown> = { error: validation.error! };
+    // Preserve extra fields (received, required) for backward-compatible error responses
+    const extra = validation as Record<string, unknown>;
+    if ("received" in extra) errorResult.received = extra.received;
+    if ("required" in extra) errorResult.required = extra.required;
+    return textResult(errorResult);
   }
+  parsedPayload = validation.data;
 
-  if (type === "review_bundle") {
-    if (!Array.isArray(parsedPayload) || parsedPayload.length < MIN_BANDWIDTH) {
-      const receivedDescription = Array.isArray(parsedPayload)
-        ? parsedPayload.length
-        : typeof parsedPayload === "object" && parsedPayload !== null
-          ? `object with keys: ${Object.keys(parsedPayload).join(", ")}`
-          : typeof parsedPayload;
-      return textResult({
-        error: `Review bundles must contain at least ${MIN_BANDWIDTH} findings (QSG bandwidth constraint: Γ_h = mN·h/α > 1)`,
-        received: receivedDescription,
-        required: MIN_BANDWIDTH,
-      });
-    }
-  }
-
-  if (type === "response") {
-    if (!Array.isArray(parsedPayload) || parsedPayload.length === 0) {
-      const receivedDescription = Array.isArray(parsedPayload)
-        ? parsedPayload.length
-        : typeof parsedPayload === "object" && parsedPayload !== null
-          ? `object with keys: ${Object.keys(parsedPayload).join(", ")}`
-          : typeof parsedPayload;
-      return textResult({
-        error: "Response must contain at least one FindingResponse",
-        received: receivedDescription,
-      });
-    }
-  }
-
+  // EvoSkills side effects (state updates after schema validation passes)
   if (type === "skill_bundle") {
-    const validationError = validateSkillBundle(state, from, parsedPayload);
-    if (validationError) return validationError;
+    const sideEffectError = updateSkillBundleState(state, from, parsedPayload);
+    if (sideEffectError) return sideEffectError;
   }
-
   if (type === "skill_verification") {
-    const validationError = validateSkillVerification(state, to, parsedPayload);
-    if (validationError) return validationError;
+    updateSkillVerificationState(state, to, parsedPayload);
   }
 
   const task: Task = {
