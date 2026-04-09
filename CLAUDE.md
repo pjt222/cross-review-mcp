@@ -104,10 +104,32 @@ npm test        # Run test suite
 npm run cli     # Run CLI orchestrator (pass args after --)
 ```
 
+## MemPalace Integration
+
+In-memory artifact cache for cross-review artifacts, organized in [MemPalace](https://github.com/mila-jovovich/mempalace)-style hierarchy. Agents can store and search briefings, findings, responses, and synthesis results within a session. Data is **in-memory only** — lost on broker restart. External MemPalace server integration is planned for a future release.
+
+Artifacts are organized as: Wing (`cross-review`) → Room (project name) → Drawer (artifact), using AAAK-style compressed formatting.
+
+### Tools
+
+- `mempalace_configure` — Initialize the in-memory artifact cache with URL, palace path, and wing name
+- `mempalace_store` — Store a cross-review artifact (briefing/finding/response/synthesis)
+- `mempalace_search` — Search stored artifacts by query, kind, or project
+- `mempalace_status` — View integration status and entry counts
+
+### Usage
+
+```bash
+# Configure via MCP tool call:
+#   mempalace_configure({ url: "http://localhost:5173/mcp" })
+# Note: URL is stored for future external integration but not currently used.
+```
+
 ## Files
 
 - `src/server.ts` — HTTP server, per-session McpServer factory, transport wiring
 - `src/broker.ts` — Pure handler functions (extracted for testability)
-- `src/types.ts` — TypeScript type definitions and QSG constants
+- `src/mempalace.ts` — MemPalace integration handlers (configure, store, search, status)
+- `src/types.ts` — TypeScript type definitions, QSG constants, and MemPalace types
 - `src/cli.ts` — CLI orchestrator (tmux/WezTerm, heart pulse, mode dispatch)
 - `src/tui.ts` — Viridis TUI dashboard (alternate screen, ANSI rendering)
