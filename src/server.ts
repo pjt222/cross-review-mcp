@@ -254,7 +254,7 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
   // Tool: mempalace_store
   server.tool(
     "mempalace_store",
-    "Store a cross-review artifact in MemPalace for long-term memory. Artifacts are organized by project (room) within the cross-review wing.",
+    "Store a cross-review artifact in the in-memory cache. Artifacts are organized by project (room) within the cross-review wing.",
     {
       agentId: z.string().describe("Your agent ID"),
       kind: z.enum(["briefing", "finding", "response", "synthesis"]).describe("Artifact type to store"),
@@ -262,10 +262,7 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
     },
     async (args) => {
       const result = handleMemPalaceStore(mpState, brokerState, args);
-      const parsed = JSON.parse(result.content[0].text);
-      if (parsed.stored) {
-        logEvent({ event: "mempalace_store", entryId: parsed.entryId, agentId: args.agentId, kind: args.kind });
-      }
+      logEvent({ event: "mempalace_store", agentId: args.agentId, kind: args.kind });
       return result;
     }
   );

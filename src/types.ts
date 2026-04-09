@@ -150,12 +150,12 @@ export const MIN_BANDWIDTH = 5;
 // --- MemPalace integration ---
 
 export interface MemPalaceConfig {
-  /** Base URL of the MemPalace MCP server (e.g., "http://localhost:5173/mcp") */
+  /** Base URL of the MemPalace MCP server (reserved for future external integration) */
   url: string;
-  /** Palace path for storage (defaults to "~/.mempalace/palace") */
-  palacePath?: string;
-  /** Wing name for cross-review artifacts (defaults to "cross-review") */
-  wing?: string;
+  /** Palace path for storage */
+  palacePath: string;
+  /** Wing name for cross-review artifacts */
+  wing: string;
 }
 
 export type MemPalaceArtifactKind = "briefing" | "finding" | "response" | "synthesis";
@@ -173,6 +173,6 @@ export interface MemPalaceEntry {
 export interface MemPalaceState {
   enabled: boolean;
   config: MemPalaceConfig | null;
-  /** Local buffer of stored entries (for status reporting) */
+  /** Local in-memory buffer of stored entries (not persisted to external MemPalace server yet) */
   entries: MemPalaceEntry[];
 }

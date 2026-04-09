@@ -1,12 +1,13 @@
 /**
  * MemPalace Integration — Cross-Review MCP Broker
  *
- * Persists review artifacts (briefings, findings, responses, synthesis)
- * into a MemPalace instance for long-term memory and searchability.
+ * In-memory artifact cache for review artifacts (briefings, findings,
+ * responses, synthesis) organized in MemPalace-style hierarchy.
+ * Data lives in-process only — lost on broker restart.
  *
- * MemPalace organizes memories hierarchically:
- *   Wing ("cross-review") → Room (project name) → Drawer (artifact)
+ * Hierarchy: Wing ("cross-review") → Room (project name) → Drawer (artifact)
  *
+ * Future: connect to external MemPalace server for persistence.
  * See: https://github.com/mila-jovovich/mempalace
  */
 
@@ -172,7 +173,7 @@ export function handleMemPalaceSearch(
     return entry.content.toLowerCase().includes(queryLower);
   });
 
-  results = results.slice(-limit);
+  results = results.slice(0, limit);
 
   return textResult({
     results: results.map((e) => ({
