@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+CONTINUE_HERE.md
+cross-review.jsonl
