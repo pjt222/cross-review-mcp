@@ -39,6 +39,8 @@ import {
   handleDeregister,
   handleGetSkillStatus,
   handleResetRound,
+  handleGetHistory,
+  handleGetFindingStatus,
 } from "./broker.js";
 import type { MemPalaceState } from "./types.js";
 import {
@@ -76,6 +78,8 @@ const state: BrokerState = {
   rounds: new Map(),
   roundHistory: new Map(),
   taskWaiters: new Map(),
+  taskHistory: new Map(),
+  findingTracker: new Map(),
 };
 
 const memPalaceState: MemPalaceState = createMemPalaceState();
@@ -269,6 +273,32 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
       agentId: z.string().describe("The agent ID to query skill evolution for"),
     },
     async (args) => handleGetSkillStatus(brokerState, args)
+  );
+
+  // Tool: get_history
+  server.tool(
+    "get_history",
+    "Retrieve acknowledged task history for an agent. Tasks move to history when acknowledged via ack_tasks. Filter by type, round, or limit results.",
+    {
+      agentId: z.string().describe("Agent ID to retrieve history for"),
+      type: z.enum(["briefing", "review_bundle", "question", "response", "synthesis", "skill_bundle", "skill_verification"]).optional().describe("Filter by task type"),
+      round: z.number().optional().describe("Filter by round number"),
+      limit: z.number().optional().describe("Max results (default 50, max 1000)"),
+    },
+    async (args) => handleGetHistory(brokerState, args)
+  );
+
+  // Tool: get_finding_status
+  server.tool(
+    "get_finding_status",
+    "Query the finding lifecycle tracker. Look up a single finding by ID, or filter by agent, status, or round. Findings are registered when review_bundles are sent and updated when responses arrive.",
+    {
+      findingId: z.string().optional().describe("Look up a specific finding by ID"),
+      agentId: z.string().optional().describe("Filter findings involving this agent (as source or target)"),
+      status: z.enum(["open", "accepted", "rejected", "discussing"]).optional().describe("Filter by finding status"),
+      round: z.number().optional().describe("Filter by round number"),
+    },
+    async (args) => handleGetFindingStatus(brokerState, args)
   );
 
   // Tool: reset_round

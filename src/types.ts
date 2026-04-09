@@ -183,6 +183,21 @@ export interface BrokerState {
   roundHistory: Map<string, Task[][]>;
   /** Long-poll waiters: agents waiting for tasks to arrive. */
   taskWaiters: Map<string, TaskWaiter[]>;
+  /** Acknowledged task history per agent (audit trail, FIFO bounded). */
+  taskHistory: Map<string, Task[]>;
+  /** Finding lifecycle tracker keyed by findingId. */
+  findingTracker: Map<string, FindingTrackerEntry>;
+}
+
+export interface FindingTrackerEntry {
+  findingId: string;
+  source: string;
+  target: string;
+  category: string;
+  status: "open" | "accepted" | "rejected" | "discussing";
+  round: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface PhaseWaiter {

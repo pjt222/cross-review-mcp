@@ -22,6 +22,8 @@ export function createFreshState(): BrokerState {
     rounds: new Map(),
     roundHistory: new Map(),
     taskWaiters: new Map(),
+    taskHistory: new Map(),
+    findingTracker: new Map(),
   };
 }
 
@@ -48,6 +50,7 @@ export function registerAgent(
   state.rounds.set(agentId, 0);
   state.roundHistory.set(agentId, []);
   state.taskWaiters.set(agentId, []);
+  state.taskHistory.set(agentId, []);
 }
 
 /**

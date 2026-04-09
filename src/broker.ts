@@ -12,6 +12,7 @@ import type {
   PhaseWaiter,
   TaskWaiter,
   SkillEvolutionState,
+  FindingTrackerEntry,
 } from "./types.js";
 import {
   PHASES,
@@ -139,6 +140,7 @@ export function handleRegister(
   state.rounds.set(agentId, 0);
   state.roundHistory.set(agentId, []);
   state.taskWaiters.set(agentId, []);
+  state.taskHistory.set(agentId, []);
 
   const peerCount = state.agents.size;
   const peers = [...state.agents.keys()].filter((id) => id !== agentId);
@@ -217,6 +219,37 @@ export function handleSendTask(
   // Resolve any long-poll waiters for the target agent
   notifyTaskWaiters(state, to);
 
+  // Track findings lifecycle (#21)
+  if (type === "review_bundle" && Array.isArray(parsedPayload)) {
+    const now = Date.now();
+    for (const finding of parsedPayload as Array<{ id?: string; category?: string }>) {
+      if (finding.id) {
+        state.findingTracker.set(finding.id, {
+          findingId: finding.id,
+          source: from,
+          target: to,
+          category: finding.category ?? "unknown",
+          status: "open",
+          round: task.round,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+  }
+  if (type === "response" && Array.isArray(parsedPayload)) {
+    const now = Date.now();
+    for (const resp of parsedPayload as Array<{ findingId?: string; verdict?: string }>) {
+      if (resp.findingId && state.findingTracker.has(resp.findingId)) {
+        const entry = state.findingTracker.get(resp.findingId)!;
+        entry.status = resp.verdict === "accept" ? "accepted"
+          : resp.verdict === "reject" ? "rejected"
+          : "discussing";
+        entry.updatedAt = now;
+      }
+    }
+  }
+
   return textResult({
     sent: true,
     taskId: task.id,
@@ -278,11 +311,17 @@ export function handleAckTasks(
 
   const ackSet = new Set(taskIds);
   const queue = state.taskQueues.get(agentId) ?? [];
+  const acked = queue.filter((task) => ackSet.has(task.id));
   const remaining = queue.filter((task) => !ackSet.has(task.id));
-  const ackedCount = queue.length - remaining.length;
   state.taskQueues.set(agentId, remaining);
 
-  return textResult({ acknowledged: ackedCount, remaining: remaining.length });
+  // Archive acked tasks to history (bounded at 1000 per agent)
+  const history = state.taskHistory.get(agentId) ?? [];
+  history.push(...acked);
+  if (history.length > 1000) history.splice(0, history.length - 1000);
+  state.taskHistory.set(agentId, history);
+
+  return textResult({ acknowledged: acked.length, remaining: remaining.length });
 }
 
 export function handleSignalPhase(
@@ -421,8 +460,78 @@ export function handleDeregister(
   state.rounds.delete(agentId);
   state.roundHistory.delete(agentId);
   state.taskWaiters.delete(agentId);
+  state.taskHistory.delete(agentId);
+  // findingTracker entries are NOT deleted — findings are cross-agent artifacts
 
   return textResult({ deregistered: true, agentId });
+}
+
+export function handleGetHistory(
+  state: BrokerState,
+  args: { agentId: string; type?: string; round?: number; limit?: number },
+): ToolResult {
+  const { agentId, type, round, limit = 50 } = args;
+
+  if (!state.agents.has(agentId)) {
+    return textResult({ error: "Agent not registered", agentId });
+  }
+
+  let history = state.taskHistory.get(agentId) ?? [];
+
+  if (type) {
+    history = history.filter((t) => t.type === type);
+  }
+  if (round !== undefined) {
+    history = history.filter((t) => t.round === round);
+  }
+
+  const bounded = Math.min(limit, 1000);
+  const sliced = history.slice(-bounded);
+
+  return textResult({
+    history: sliced,
+    count: sliced.length,
+    totalHistory: (state.taskHistory.get(agentId) ?? []).length,
+  });
+}
+
+export function handleGetFindingStatus(
+  state: BrokerState,
+  args: { findingId?: string; agentId?: string; status?: string; round?: number },
+): ToolResult {
+  const { findingId, agentId, status, round } = args;
+
+  // Single finding lookup
+  if (findingId) {
+    const entry = state.findingTracker.get(findingId);
+    if (!entry) {
+      return textResult({ error: "Finding not found", findingId });
+    }
+    return textResult({ finding: entry });
+  }
+
+  // Filtered listing
+  let entries = [...state.findingTracker.values()];
+  if (agentId) {
+    entries = entries.filter((e) => e.source === agentId || e.target === agentId);
+  }
+  if (status) {
+    entries = entries.filter((e) => e.status === status);
+  }
+  if (round !== undefined) {
+    entries = entries.filter((e) => e.round === round);
+  }
+
+  const byStatus: Record<string, number> = {};
+  for (const e of entries) {
+    byStatus[e.status] = (byStatus[e.status] ?? 0) + 1;
+  }
+
+  return textResult({
+    findings: entries,
+    count: entries.length,
+    byStatus,
+  });
 }
 
 export function handleResetRound(
