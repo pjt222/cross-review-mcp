@@ -212,6 +212,9 @@ function parseArgs(argv: string[]): CliOptions {
 // ── Agent topology ─────────────────────────────────────────────────────
 
 function buildAgents(opts: CliOptions): AgentSpec[] {
+  if (opts.projects.length > 26) {
+    throw new Error(`Maximum 26 agents supported (got ${opts.projects.length})`);
+  }
   const agents: AgentSpec[] = opts.projects.map((p, i) => ({
     id: `agent-${String.fromCharCode(65 + i)}`,   // agent-A, agent-B, ...
     project: p,
@@ -310,7 +313,7 @@ function createTmuxSession(opts: CliOptions, agents: AgentSpec[]): void {
 
 function startBroker(opts: CliOptions): void {
   const target = `${opts.sessionName}:broker`;
-  tmuxSend(target, `cd ${resolve(".")} && CROSS_REVIEW_PORT=${opts.port} npm start`);
+  tmuxSend(target, `cd "${resolve(".")}" && CROSS_REVIEW_PORT=${opts.port} npm start`);
 }
 
 function startAgent(agent: AgentSpec, allAgents: AgentSpec[], opts: CliOptions): void {
@@ -318,7 +321,7 @@ function startAgent(agent: AgentSpec, allAgents: AgentSpec[], opts: CliOptions):
   const brokerUrl = `http://localhost:${opts.port}/mcp`;
 
   // Navigate to agent's project directory
-  tmuxSend(target, `cd ${agent.project}`);
+  tmuxSend(target, `cd "${agent.project}"`);
 
   // Add MCP server to claude and start conversation
   tmuxSend(target, `claude mcp add cross-review --transport http ${brokerUrl}`);
@@ -330,7 +333,11 @@ function launchAgentConversation(agent: AgentSpec, allAgents: AgentSpec[], opts:
 
   // Start claude with the system prompt — use --dangerously-skip-permissions
   // so the agent can use MCP tools without manual approval in headless mode
-  const escapedPrompt = prompt.replace(/'/g, "'\\''");
+  const escapedPrompt = prompt
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "'\\''")
+    .replace(/\n/g, " ")
+    .replace(/\x1b/g, "");   // strip ANSI escape sequences
   tmuxSend(target, `claude --dangerously-skip-permissions -p '${escapedPrompt}'`);
 }
 
@@ -636,6 +643,15 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // Warn about unrestricted permissions in headless mode
+  console.warn(`
+⚠️  WARNING: This orchestrator runs Claude Code with --dangerously-skip-permissions.
+   Agents will have UNRESTRICTED filesystem and shell access to these projects:
+${agents.map(a => `     - ${a.project}`).join("\n")}
+   Press Ctrl+C within 5 seconds to abort.
+`);
+  await sleep(5000);
 
   // Create tmux session with all panes
   log("Creating tmux session");

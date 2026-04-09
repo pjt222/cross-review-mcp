@@ -93,6 +93,8 @@ The orchestrator monitors each agent's tmux pane for activity. Idle agents recei
 - `claude` — Claude Code CLI (required)
 - `wezterm` — terminal host (optional, enhances headless mode)
 
+**Security note**: The orchestrator runs Claude Code with `--dangerously-skip-permissions`, granting agents unrestricted filesystem and shell access to the specified project directories. A 5-second warning is displayed before launch.
+
 ## Commands
 
 ```bash

@@ -169,8 +169,9 @@ describe("Tui pulse recording", () => {
     state.agents[1].idleCycles = 3;
     tui.recordPulse();
 
-    // Pulse history is internal but recordPulse shouldn't throw
-    expect(true).toBe(true);
+    // Verify state is still valid after recording pulses
+    expect(state.agents[0].idleCycles).toBe(0);
+    expect(state.agents[1].idleCycles).toBe(3);
   });
 });
 
