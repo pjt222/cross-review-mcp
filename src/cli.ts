@@ -389,13 +389,28 @@ function getNudgePrompt(agent: AgentSpec, allAgents: AgentSpec[], opts: CliOptio
 }
 
 function detectPhase(content: string): string | undefined {
-  const phases = ["complete", "synthesis", "dialogue", "review", "briefing", "registered"];
-  for (const p of phases) {
-    if (content.includes(`"${p}"`) || content.includes(`phase: ${p}`) || content.includes(`"phase":"${p}"`)) {
-      return p;
-    }
+  // Match actual broker responses (e.g. {"phaseUpdated":true,...,"phase":"review"})
+  // not bare phase names that appear in prompts or instructions.
+  const phaseResponsePattern = /"phaseUpdated"\s*:\s*true[^}]*"phase"\s*:\s*"(\w+)"/g;
+  let lastPhase: string | undefined;
+  let match: RegExpExecArray | null;
+  while ((match = phaseResponsePattern.exec(content)) !== null) {
+    lastPhase = match[1];
   }
-  return undefined;
+  if (lastPhase) return lastPhase;
+
+  // Fallback: match "phase":"X" in JSON only when preceded by a quote (tool output context)
+  const jsonPhasePattern = /"phase"\s*:\s*"(complete|synthesis|dialogue|review|briefing|registered)"/g;
+  // Count occurrences — only trust if it appears in output lines (not the initial prompt)
+  // The prompt is typically one long line; broker responses appear on separate lines
+  const lines = content.split("\n");
+  const outputLines = lines.filter(l => !l.includes("Your workflow:") && !l.includes("Signal \"complete\""));
+  const outputContent = outputLines.join("\n");
+  let lastJsonPhase: string | undefined;
+  while ((match = jsonPhasePattern.exec(outputContent)) !== null) {
+    lastJsonPhase = match[1];
+  }
+  return lastJsonPhase;
 }
 
 async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions, tui?: Tui, tuiState?: TuiState): Promise<void> {
@@ -515,12 +530,13 @@ async function heartbeatLoop(agents: AgentSpec[], opts: CliOptions, tui?: Tui, t
       break;
     }
 
-    // Check if all agents show "complete" in their output
+    // Check if all agents show "complete" in their output (via broker response, not prompt text)
     let allComplete = true;
     for (const agent of agents) {
       const target = `${opts.sessionName}:${agent.id}`;
       const content = tmuxCapture(target, 20);
-      if (!content.includes('"complete"') && !content.includes("phase: complete")) {
+      const hasPhaseComplete = /"phaseUpdated"\s*:\s*true[^}]*"phase"\s*:\s*"complete"/.test(content);
+      if (!hasPhaseComplete) {
         allComplete = false;
         break;
       }

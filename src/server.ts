@@ -24,6 +24,7 @@ import { z } from "zod";
 import {
   type BrokerState,
   type FindingResponse,
+  createFreshState,
   MIN_BANDWIDTH,
   MAX_EVOLUTION_ROUNDS,
   MIN_SKILL_ARTIFACTS,
@@ -69,19 +70,7 @@ function logEvent(event: Record<string, unknown>): void {
 
 // --- Broker state (in-memory, single process, shared across all connections) ---
 
-const state: BrokerState = {
-  agents: new Map(),
-  phases: new Map(),
-  taskQueues: new Map(),
-  phaseWaiters: new Map(),
-  sentTaskTypes: new Map(),
-  skillEvolution: new Map(),
-  rounds: new Map(),
-  roundHistory: new Map(),
-  taskWaiters: new Map(),
-  taskHistory: new Map(),
-  findingTracker: new Map(),
-};
+const state: BrokerState = createFreshState();
 
 const memPalaceState: MemPalaceState = createMemPalaceState();
 
@@ -479,16 +468,7 @@ const handleHttpRequest = createHttpHandler(state, transports, memPalaceState);
 // --- Test helper: start an isolated server on a random port ---
 
 export async function startTestServer(): Promise<{ url: string; close: () => Promise<void> }> {
-  const testState: BrokerState = {
-    agents: new Map(),
-    phases: new Map(),
-    taskQueues: new Map(),
-    phaseWaiters: new Map(),
-    sentTaskTypes: new Map(),
-    skillEvolution: new Map(),
-    rounds: new Map(),
-    roundHistory: new Map(),
-  };
+  const testState: BrokerState = createFreshState();
   const testTransports = new Map<string, StreamableHTTPServerTransport>();
   const testMpState = createMemPalaceState();
   const handler = createHttpHandler(testState, testTransports, testMpState);

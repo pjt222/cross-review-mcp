@@ -125,6 +125,52 @@ describe("captureHash", () => {
   });
 });
 
+// ── Phase detection tests ─────────────────────────────────────────────
+
+function detectPhase(content: string): string | undefined {
+  const phaseResponsePattern = /"phaseUpdated"\s*:\s*true[^}]*"phase"\s*:\s*"(\w+)"/g;
+  let lastPhase: string | undefined;
+  let match: RegExpExecArray | null;
+  while ((match = phaseResponsePattern.exec(content)) !== null) {
+    lastPhase = match[1];
+  }
+  if (lastPhase) return lastPhase;
+
+  const jsonPhasePattern = /"phase"\s*:\s*"(complete|synthesis|dialogue|review|briefing|registered)"/g;
+  const lines = content.split("\n");
+  const outputLines = lines.filter(l => !l.includes("Your workflow:") && !l.includes("Signal \"complete\""));
+  const outputContent = outputLines.join("\n");
+  let lastJsonPhase: string | undefined;
+  while ((match = jsonPhasePattern.exec(outputContent)) !== null) {
+    lastJsonPhase = match[1];
+  }
+  return lastJsonPhase;
+}
+
+describe("detectPhase", () => {
+  it("detects phase from broker response JSON", () => {
+    const content = 'some output\n{"phaseUpdated":true,"agentId":"agent-A","phase":"review","peerPhases":{}}\nmore output';
+    expect(detectPhase(content)).toBe("review");
+  });
+
+  it("does NOT false-positive on prompt text mentioning phases", () => {
+    const prompt = 'Signal "complete" when done. Your workflow: 1. Register... 10. Signal "complete"';
+    expect(detectPhase(prompt)).toBeUndefined();
+  });
+
+  it("detects the LAST phase when multiple broker responses exist", () => {
+    const content = [
+      '{"phaseUpdated":true,"agentId":"a","phase":"briefing","peerPhases":{}}',
+      '{"phaseUpdated":true,"agentId":"a","phase":"review","peerPhases":{}}',
+    ].join("\n");
+    expect(detectPhase(content)).toBe("review");
+  });
+
+  it("returns undefined when no phase signals present", () => {
+    expect(detectPhase("just some regular output with no JSON")).toBeUndefined();
+  });
+});
+
 // ── Ring topology invariants ───────────────────────────────────────────
 
 describe("ring topology invariants", () => {

@@ -140,9 +140,37 @@ Artifacts are organized as: Wing (`cross-review`) → Room (project name) → Dr
 
 ## Files
 
+### Source
+
 - `src/server.ts` — HTTP server, per-session McpServer factory, transport wiring
 - `src/broker.ts` — Pure handler functions (extracted for testability)
 - `src/mempalace.ts` — MemPalace integration handlers (configure, store, search, status)
-- `src/types.ts` — TypeScript type definitions, QSG constants, and MemPalace types
+- `src/schemas.ts` — Zod payload validation schemas and `validatePayload()` helper
+- `src/types.ts` — TypeScript type definitions, QSG constants, MemPalace types, `createFreshState()`
 - `src/cli.ts` — CLI orchestrator (tmux/WezTerm, heart pulse, mode dispatch)
 - `src/tui.ts` — Viridis TUI dashboard (alternate screen, ANSI rendering)
+- `src/test-helpers.ts` — Shared test utilities (state factories, fixture builders)
+
+### Tests
+
+- `src/registration.test.ts` — Agent register/deregister
+- `src/deregister.test.ts` — Deregistration edge cases
+- `src/send-task.test.ts` — Task sending, bandwidth enforcement, payload validation
+- `src/signal-phase.test.ts` — Phase lifecycle and preconditions
+- `src/transport.test.ts` — HTTP transport and session management
+- `src/long-poll.test.ts` — Long-poll task delivery
+- `src/multi-round.test.ts` — Round reset and task archival
+- `src/evoskills.test.ts` — Skill evolution, convergence detection
+- `src/mempalace.test.ts` — MemPalace in-memory cache
+- `src/synthesis.test.ts` — Synthesis phase
+- `src/history.test.ts` — Task history retrieval
+- `src/finding-tracker.test.ts` — Finding lifecycle tracking
+- `src/generate-synthesis.test.ts` — Structured synthesis generation
+- `src/cli.test.ts` — CLI orchestrator
+- `src/tui.test.ts` — TUI dashboard
+
+### Docs
+
+- `docs/usage-guide.md` — Step-by-step usage guide for agents
+- `docs/protocol-reference.md` — Complete tool and protocol reference
+- `docs/e2e-session.md` — End-to-end session runbook (CLI orchestrator + manual)

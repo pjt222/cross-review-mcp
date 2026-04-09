@@ -6,26 +6,9 @@
  * helpers provide a clean interface for that.
  */
 
-import type { BrokerState, Phase } from "./types.js";
+import { type BrokerState, type Phase, createFreshState } from "./types.js";
 
-/**
- * Create a fresh broker state for testing.
- */
-export function createFreshState(): BrokerState {
-  return {
-    agents: new Map(),
-    phases: new Map(),
-    taskQueues: new Map(),
-    phaseWaiters: new Map(),
-    sentTaskTypes: new Map(),
-    skillEvolution: new Map(),
-    rounds: new Map(),
-    roundHistory: new Map(),
-    taskWaiters: new Map(),
-    taskHistory: new Map(),
-    findingTracker: new Map(),
-  };
-}
+export { createFreshState };
 
 /**
  * Register an agent directly in state (bypasses the MCP tool layer).
