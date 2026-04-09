@@ -181,11 +181,17 @@ export interface BrokerState {
   rounds: Map<string, number>;
   /** Archived tasks from completed rounds, per agent. */
   roundHistory: Map<string, Task[][]>;
+  /** Long-poll waiters: agents waiting for tasks to arrive. */
+  taskWaiters: Map<string, TaskWaiter[]>;
 }
 
 export interface PhaseWaiter {
   targetPhase: Phase;
   resolve: (value: { reached: boolean }) => void;
+}
+
+export interface TaskWaiter {
+  resolve: (value: { tasks: Task[]; count: number }) => void;
 }
 
 /**

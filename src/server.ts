@@ -75,6 +75,7 @@ const state: BrokerState = {
   skillEvolution: new Map(),
   rounds: new Map(),
   roundHistory: new Map(),
+  taskWaiters: new Map(),
 };
 
 const memPalaceState: MemPalaceState = createMemPalaceState();
@@ -195,12 +196,13 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
     }
   );
 
-  // Tool: poll_tasks
+  // Tool: poll_tasks (with optional long-poll)
   server.tool(
     "poll_tasks",
-    "Retrieve pending tasks for this agent. Tasks remain in queue until acknowledged via ack_tasks.",
+    "Retrieve pending tasks for this agent. Tasks remain in queue until acknowledged via ack_tasks. Use timeout for long-polling: blocks until tasks arrive or timeout expires (eliminates empty poll cycles).",
     {
       agentId: z.string().describe("Your agent ID"),
+      timeout: z.number().optional().describe("Long-poll timeout in milliseconds. 0 or omitted = immediate return. Max 300000 (5 min)."),
     },
     async (args) => handlePollTasks(brokerState, args)
   );

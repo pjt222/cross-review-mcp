@@ -62,7 +62,7 @@ describe("handleResetRound", () => {
     expect(result.error).toMatch(/not registered/);
   });
 
-  it("archives current tasks on reset", () => {
+  it("archives current tasks on reset", async () => {
     // Send a task to alice, then reset
     markSentType(state, "bob", "briefing");
     setPhase(state, "bob", "review");
@@ -78,7 +78,7 @@ describe("handleResetRound", () => {
 
     expect(result.archivedTasks).toBe(1);
     // Task queue should be empty after reset
-    const poll = parse(handlePollTasks(state, { agentId: "alice" }));
+    const poll = parse(await handlePollTasks(state, { agentId: "alice" }));
     expect(poll.count).toBe(0);
     // History should contain the archived round
     expect(state.roundHistory.get("alice")!.length).toBe(1);

@@ -11,6 +11,7 @@ import type {
   FindingResponse,
   Phase,
   PhaseWaiter,
+  TaskWaiter,
   SkillPackage,
   SkillVerification,
   SkillEvolutionState,
@@ -64,6 +65,17 @@ export function notifyPhaseWaiters(state: BrokerState, agentId: string, phase: P
   }
 
   state.phaseWaiters.set(agentId, remaining);
+}
+
+export function notifyTaskWaiters(state: BrokerState, agentId: string): void {
+  const waiters = state.taskWaiters.get(agentId) ?? [];
+  if (waiters.length === 0) return;
+
+  const queue = state.taskQueues.get(agentId) ?? [];
+  for (const waiter of waiters) {
+    waiter.resolve({ tasks: queue, count: queue.length });
+  }
+  state.taskWaiters.set(agentId, []);
 }
 
 // --- EvoSkills validators (extracted for readability) ---
@@ -178,6 +190,7 @@ export function handleRegister(
   state.sentTaskTypes.set(agentId, new Set());
   state.rounds.set(agentId, 0);
   state.roundHistory.set(agentId, []);
+  state.taskWaiters.set(agentId, []);
 
   const peerCount = state.agents.size;
   const peers = [...state.agents.keys()].filter((id) => id !== agentId);
@@ -276,6 +289,9 @@ export function handleSendTask(
 
   state.sentTaskTypes.get(from)?.add(type as Task["type"]);
 
+  // Resolve any long-poll waiters for the target agent
+  notifyTaskWaiters(state, to);
+
   return textResult({
     sent: true,
     taskId: task.id,
@@ -286,18 +302,43 @@ export function handleSendTask(
   });
 }
 
-export function handlePollTasks(
+export async function handlePollTasks(
   state: BrokerState,
-  args: { agentId: string },
-): ToolResult {
-  const { agentId } = args;
+  args: { agentId: string; timeout?: number },
+  maxTimeoutMs = 5 * 60 * 1000,
+): Promise<ToolResult> {
+  const { agentId, timeout } = args;
 
   if (!state.agents.has(agentId)) {
     return textResult({ error: "Agent not registered", agentId });
   }
 
   const queue = state.taskQueues.get(agentId) ?? [];
-  return textResult({ tasks: queue, count: queue.length });
+
+  // Immediate return if tasks exist or no timeout requested
+  if (queue.length > 0 || !timeout || timeout <= 0) {
+    return textResult({ tasks: queue, count: queue.length });
+  }
+
+  // Long-poll: wait for tasks to arrive or timeout
+  const waitMs = Math.min(timeout, maxTimeoutMs);
+  const result = await new Promise<{ tasks: Task[]; count: number }>((resolve) => {
+    const waiter: TaskWaiter = { resolve };
+    const waiters = state.taskWaiters.get(agentId) ?? [];
+    waiters.push(waiter);
+    state.taskWaiters.set(agentId, waiters);
+
+    setTimeout(() => {
+      const currentWaiters = state.taskWaiters.get(agentId) ?? [];
+      const filtered = currentWaiters.filter((w) => w !== waiter);
+      state.taskWaiters.set(agentId, filtered);
+      // Return current queue state on timeout (may have tasks from concurrent sends)
+      const currentQueue = state.taskQueues.get(agentId) ?? [];
+      resolve({ tasks: currentQueue, count: currentQueue.length });
+    }, waitMs);
+  });
+
+  return textResult({ tasks: result.tasks, count: result.count });
 }
 
 export function handleAckTasks(
@@ -434,10 +475,16 @@ export function handleDeregister(
     return textResult({ error: "Agent not registered", agentId });
   }
 
-  // Resolve any pending waiters targeting this agent with reached: false
-  const waiters = state.phaseWaiters.get(agentId) ?? [];
-  for (const waiter of waiters) {
+  // Resolve any pending phase waiters with reached: false
+  const phaseWaiters = state.phaseWaiters.get(agentId) ?? [];
+  for (const waiter of phaseWaiters) {
     waiter.resolve({ reached: false });
+  }
+
+  // Resolve any pending task waiters with empty result
+  const taskWaiters = state.taskWaiters.get(agentId) ?? [];
+  for (const waiter of taskWaiters) {
+    waiter.resolve({ tasks: [], count: 0 });
   }
 
   // Remove from all state maps
@@ -448,6 +495,7 @@ export function handleDeregister(
   state.sentTaskTypes.delete(agentId);
   state.rounds.delete(agentId);
   state.roundHistory.delete(agentId);
+  state.taskWaiters.delete(agentId);
 
   return textResult({ deregistered: true, agentId });
 }

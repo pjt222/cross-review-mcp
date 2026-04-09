@@ -245,14 +245,14 @@ describe("handlePollTasks", () => {
     registerAgent(state, "bob", "project-b");
   });
 
-  it("returns empty (count: 0) for newly registered agent", () => {
-    const result = parse(handlePollTasks(state, { agentId: "alice" }));
+  it("returns empty (count: 0) for newly registered agent", async () => {
+    const result = parse(await handlePollTasks(state, { agentId: "alice" }));
 
     expect(result.count).toBe(0);
     expect(result.tasks).toEqual([]);
   });
 
-  it("returns tasks after send_task delivers to the agent", () => {
+  it("returns tasks after send_task delivers to the agent", async () => {
     handleSendTask(state, {
       from: "alice",
       to: "bob",
@@ -260,7 +260,7 @@ describe("handlePollTasks", () => {
       payload: JSON.stringify({ project: "project-a" }),
     });
 
-    const result = parse(handlePollTasks(state, { agentId: "bob" }));
+    const result = parse(await handlePollTasks(state, { agentId: "bob" }));
 
     expect(result.count).toBe(1);
     expect(result.tasks[0].from).toBe("alice");
@@ -268,13 +268,13 @@ describe("handlePollTasks", () => {
     expect(result.tasks[0].type).toBe("briefing");
   });
 
-  it("returns error for unregistered agent", () => {
-    const result = parse(handlePollTasks(state, { agentId: "unknown" }));
+  it("returns error for unregistered agent", async () => {
+    const result = parse(await handlePollTasks(state, { agentId: "unknown" }));
 
     expect(result.error).toMatch(/Agent not registered/);
   });
 
-  it("tasks persist across multiple polls (peek-not-drain semantics)", () => {
+  it("tasks persist across multiple polls (peek-not-drain semantics)", async () => {
     handleSendTask(state, {
       from: "alice",
       to: "bob",
@@ -282,8 +282,8 @@ describe("handlePollTasks", () => {
       payload: JSON.stringify({ project: "project-a" }),
     });
 
-    const firstPoll = parse(handlePollTasks(state, { agentId: "bob" }));
-    const secondPoll = parse(handlePollTasks(state, { agentId: "bob" }));
+    const firstPoll = parse(await handlePollTasks(state, { agentId: "bob" }));
+    const secondPoll = parse(await handlePollTasks(state, { agentId: "bob" }));
 
     expect(firstPoll.count).toBe(1);
     expect(secondPoll.count).toBe(1);
@@ -300,7 +300,7 @@ describe("handleAckTasks", () => {
     registerAgent(state, "bob", "project-b");
   });
 
-  it("removes specific tasks from queue, verified via poll", () => {
+  it("removes specific tasks from queue, verified via poll", async () => {
     handleSendTask(state, {
       from: "alice",
       to: "bob",
@@ -308,14 +308,14 @@ describe("handleAckTasks", () => {
       payload: JSON.stringify({ project: "project-a" }),
     });
 
-    const poll = parse(handlePollTasks(state, { agentId: "bob" }));
+    const poll = parse(await handlePollTasks(state, { agentId: "bob" }));
     const taskId = poll.tasks[0].id;
 
     const ackResult = parse(handleAckTasks(state, { agentId: "bob", taskIds: [taskId] }));
     expect(ackResult.acknowledged).toBe(1);
     expect(ackResult.remaining).toBe(0);
 
-    const afterAck = parse(handlePollTasks(state, { agentId: "bob" }));
+    const afterAck = parse(await handlePollTasks(state, { agentId: "bob" }));
     expect(afterAck.count).toBe(0);
   });
 
@@ -327,7 +327,7 @@ describe("handleAckTasks", () => {
     expect(result.acknowledged).toBe(0);
   });
 
-  it("partial ack — send 2 tasks, ack 1, verify 1 remains", () => {
+  it("partial ack — send 2 tasks, ack 1, verify 1 remains", async () => {
     handleSendTask(state, {
       from: "alice",
       to: "bob",
@@ -341,7 +341,7 @@ describe("handleAckTasks", () => {
       payload: JSON.stringify({ id: "q1", aboutFile: "src/x.ts", question: "Why?" }),
     });
 
-    const poll = parse(handlePollTasks(state, { agentId: "bob" }));
+    const poll = parse(await handlePollTasks(state, { agentId: "bob" }));
     expect(poll.count).toBe(2);
 
     const firstTaskId = poll.tasks[0].id;
@@ -352,7 +352,7 @@ describe("handleAckTasks", () => {
     expect(ackResult.acknowledged).toBe(1);
     expect(ackResult.remaining).toBe(1);
 
-    const afterAck = parse(handlePollTasks(state, { agentId: "bob" }));
+    const afterAck = parse(await handlePollTasks(state, { agentId: "bob" }));
     expect(afterAck.count).toBe(1);
     expect(afterAck.tasks[0].id).toBe(poll.tasks[1].id);
   });
