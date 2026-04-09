@@ -38,6 +38,7 @@ import {
   handleGetStatus,
   handleDeregister,
   handleGetSkillStatus,
+  handleResetRound,
 } from "./broker.js";
 import type { MemPalaceState } from "./types.js";
 import {
@@ -72,6 +73,8 @@ const state: BrokerState = {
   phaseWaiters: new Map(),
   sentTaskTypes: new Map(),
   skillEvolution: new Map(),
+  rounds: new Map(),
+  roundHistory: new Map(),
 };
 
 const memPalaceState: MemPalaceState = createMemPalaceState();
@@ -107,6 +110,11 @@ Constraints:
 3. **dialogue** — Read findings about own project, respond with FindingResponse[] verdicts. Must have sent a review_bundle first.
 4. **synthesis** — Produce a Synthesis artifact: accepted findings with planned actions, rejected findings with reasons. Must have sent a response first. Each agent synthesizes what it learned about its own project.
 5. **complete** — All findings processed and synthesized. Signal completion.
+
+## Multi-Round Support
+After completing a round, agents can call \`reset_round\` to start a new review cycle.
+This resets the phase to "registered", archives current tasks, and increments the round counter.
+The agent then proceeds through the full phase lifecycle again for the next topic or review pass.
 
 Skill exchange (skill_bundle / skill_verification) can happen during any phase after briefing.
 
@@ -259,6 +267,23 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
       agentId: z.string().describe("The agent ID to query skill evolution for"),
     },
     async (args) => handleGetSkillStatus(brokerState, args)
+  );
+
+  // Tool: reset_round
+  server.tool(
+    "reset_round",
+    "Reset phase to registered for a new review round. Only callable when in complete phase. Archives current tasks and increments the round counter.",
+    {
+      agentId: z.string().describe("Your agent ID"),
+    },
+    async (args) => {
+      const result = handleResetRound(brokerState, args);
+      const parsed = JSON.parse(result.content[0].text);
+      if (parsed.roundReset) {
+        logEvent({ event: "reset_round", agentId: args.agentId, newRound: parsed.newRound, archivedTasks: parsed.archivedTasks });
+      }
+      return result;
+    }
   );
 
   // Tool: deregister
@@ -418,6 +443,8 @@ export async function startTestServer(): Promise<{ url: string; close: () => Pro
     phaseWaiters: new Map(),
     sentTaskTypes: new Map(),
     skillEvolution: new Map(),
+    rounds: new Map(),
+    roundHistory: new Map(),
   };
   const testTransports = new Map<string, StreamableHTTPServerTransport>();
   const testMpState = createMemPalaceState();

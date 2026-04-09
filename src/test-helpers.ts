@@ -19,6 +19,8 @@ export function createFreshState(): BrokerState {
     phaseWaiters: new Map(),
     sentTaskTypes: new Map(),
     skillEvolution: new Map(),
+    rounds: new Map(),
+    roundHistory: new Map(),
   };
 }
 
@@ -42,6 +44,8 @@ export function registerAgent(
   state.taskQueues.set(agentId, []);
   state.phaseWaiters.set(agentId, []);
   state.sentTaskTypes.set(agentId, new Set());
+  state.rounds.set(agentId, 0);
+  state.roundHistory.set(agentId, []);
 }
 
 /**

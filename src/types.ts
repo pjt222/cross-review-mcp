@@ -155,6 +155,8 @@ export interface Task {
   type: TaskType;
   payload: Briefing | Finding[] | Question | FindingResponse[] | Synthesis | SkillPackage | SkillVerification;
   createdAt: number;
+  /** Review round this task belongs to (0-indexed). */
+  round: number;
 }
 
 export interface Question {
@@ -175,6 +177,10 @@ export interface BrokerState {
   sentTaskTypes: Map<string, Set<TaskType>>;
   /** EvoSkills: per-agent skill evolution state. */
   skillEvolution: Map<string, SkillEvolutionState>;
+  /** Current review round per agent (0-indexed). */
+  rounds: Map<string, number>;
+  /** Archived tasks from completed rounds, per agent. */
+  roundHistory: Map<string, Task[][]>;
 }
 
 export interface PhaseWaiter {

@@ -176,6 +176,8 @@ export function handleRegister(
   state.taskQueues.set(agentId, []);
   state.phaseWaiters.set(agentId, []);
   state.sentTaskTypes.set(agentId, new Set());
+  state.rounds.set(agentId, 0);
+  state.roundHistory.set(agentId, []);
 
   const peerCount = state.agents.size;
   const peers = [...state.agents.keys()].filter((id) => id !== agentId);
@@ -265,6 +267,7 @@ export function handleSendTask(
     type: type as Task["type"],
     payload: parsedPayload as Task["payload"],
     createdAt: Date.now(),
+    round: state.rounds.get(from) ?? 0,
   };
 
   const queue = state.taskQueues.get(to) ?? [];
@@ -443,18 +446,64 @@ export function handleDeregister(
   state.taskQueues.delete(agentId);
   state.phaseWaiters.delete(agentId);
   state.sentTaskTypes.delete(agentId);
+  state.rounds.delete(agentId);
+  state.roundHistory.delete(agentId);
 
   return textResult({ deregistered: true, agentId });
 }
 
+export function handleResetRound(
+  state: BrokerState,
+  args: { agentId: string },
+): ToolResult {
+  const { agentId } = args;
+
+  if (!state.agents.has(agentId)) {
+    return textResult({ error: "Agent not registered", agentId });
+  }
+
+  const currentPhase = state.phases.get(agentId)!;
+  if (currentPhase !== "complete") {
+    return textResult({
+      error: "Can only reset round from complete phase",
+      currentPhase,
+      hint: "Signal phase 'complete' before calling reset_round",
+    });
+  }
+
+  const currentRound = state.rounds.get(agentId) ?? 0;
+
+  // Archive current round's tasks
+  const currentTasks = state.taskQueues.get(agentId) ?? [];
+  const history = state.roundHistory.get(agentId) ?? [];
+  history.push(currentTasks);
+  state.roundHistory.set(agentId, history);
+
+  // Reset for new round
+  const nextRound = currentRound + 1;
+  state.rounds.set(agentId, nextRound);
+  state.phases.set(agentId, "registered");
+  state.taskQueues.set(agentId, []);
+  state.sentTaskTypes.set(agentId, new Set());
+
+  return textResult({
+    roundReset: true,
+    agentId,
+    previousRound: currentRound,
+    newRound: nextRound,
+    archivedTasks: currentTasks.length,
+  });
+}
+
 export function handleGetStatus(state: BrokerState): ToolResult {
-  const agents: Record<string, { project: string; phase: Phase; pendingTasks: number }> = {};
+  const agents: Record<string, { project: string; phase: Phase; pendingTasks: number; round: number }> = {};
 
   for (const [id, reg] of state.agents.entries()) {
     agents[id] = {
       project: reg.project,
       phase: state.phases.get(id) ?? "registered",
       pendingTasks: (state.taskQueues.get(id) ?? []).length,
+      round: state.rounds.get(id) ?? 0,
     };
   }
 
