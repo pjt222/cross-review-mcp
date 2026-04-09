@@ -174,13 +174,12 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
             }
           }
         } else if (args.type === "skill_bundle") {
-          let parsedPayload: Record<string, unknown>;
-          try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = {}; }
-          logEvent({ event: "skill_bundle", taskId: parsed.taskId, from: args.from, to: args.to, skillId: parsedPayload.skillId, evolutionRound: parsedPayload.evolutionRound, artifactCount: Array.isArray(parsedPayload.artifacts) ? parsedPayload.artifacts.length : 0 });
+          // Payload already validated by handleSendTask — safe to parse
+          const skillPayload = JSON.parse(args.payload) as Record<string, unknown>;
+          logEvent({ event: "skill_bundle", taskId: parsed.taskId, from: args.from, to: args.to, skillId: skillPayload.skillId, evolutionRound: skillPayload.evolutionRound, artifactCount: Array.isArray(skillPayload.artifacts) ? skillPayload.artifacts.length : 0 });
         } else if (args.type === "skill_verification") {
-          let parsedPayload: Record<string, unknown>;
-          try { parsedPayload = JSON.parse(args.payload); } catch { parsedPayload = {}; }
-          logEvent({ event: "skill_verification", taskId: parsed.taskId, from: args.from, to: args.to, skillId: parsedPayload.skillId, pass: parsedPayload.pass, score: parsedPayload.score });
+          const verPayload = JSON.parse(args.payload) as Record<string, unknown>;
+          logEvent({ event: "skill_verification", taskId: parsed.taskId, from: args.from, to: args.to, skillId: verPayload.skillId, pass: verPayload.pass, score: verPayload.score });
         }
       }
 
