@@ -110,7 +110,7 @@ describe("handleSendTask", () => {
     expect(result.required).toBe(5);
   });
 
-  it("rejects review_bundle with non-array payload", () => {
+  it("accepts review_bundle wrapped as {findings:[...]}", () => {
     const result = parse(
       handleSendTask(state, {
         from: "alice",
@@ -120,8 +120,49 @@ describe("handleSendTask", () => {
       }),
     );
 
+    expect(result.sent).toBe(true);
+    expect(result.findingCount).toBe(5);
+  });
+
+  it("rejects wrapped review_bundle with too few findings", () => {
+    const result = parse(
+      handleSendTask(state, {
+        from: "alice",
+        to: "bob",
+        type: "review_bundle",
+        payload: JSON.stringify({ findings: makeFindingsPayload(3) }),
+      }),
+    );
+
     expect(result.error).toMatch(/at least 5 findings/);
-    expect(result.received).toBe(0);
+    expect(result.received).toBe(3);
+  });
+
+  it("does not unwrap multi-key wrapper objects", () => {
+    const result = parse(
+      handleSendTask(state, {
+        from: "alice",
+        to: "bob",
+        type: "review_bundle",
+        payload: JSON.stringify({ findings: makeFindingsPayload(5), meta: "extra" }),
+      }),
+    );
+
+    expect(result.error).toMatch(/at least 5 findings/);
+    expect(result.received).toMatch(/object with keys/);
+  });
+
+  it("accepts response wrapped as {responses:[...]}", () => {
+    const result = parse(
+      handleSendTask(state, {
+        from: "alice",
+        to: "bob",
+        type: "response",
+        payload: JSON.stringify({ responses: makeResponsePayload(2) }),
+      }),
+    );
+
+    expect(result.sent).toBe(true);
   });
 
   it("accepts review_bundle with exactly 5 findings", () => {
@@ -163,7 +204,7 @@ describe("handleSendTask", () => {
     );
 
     expect(result.error).toMatch(/at least one FindingResponse/);
-    expect(result.received).toBe(0);
+    expect(result.received).toMatch(/object with keys/);
   });
 
   it("accepts valid response with makeResponsePayload(2)", () => {

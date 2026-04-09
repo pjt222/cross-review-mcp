@@ -27,6 +27,19 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Unwrap single-key wrapper objects: {findings:[...]} -> [...] */
+function unwrapArrayPayload(parsed: unknown): unknown {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const keys = Object.keys(parsed as Record<string, unknown>);
+    if (keys.length === 1) {
+      const value = (parsed as Record<string, unknown>)[keys[0]];
+      if (Array.isArray(value)) return value;
+    }
+  }
+  return parsed;
+}
+
 export function notifyPhaseWaiters(state: BrokerState, agentId: string, phase: Phase): void {
   const waiters = state.phaseWaiters.get(agentId) ?? [];
   const remaining: PhaseWaiter[] = [];
@@ -114,11 +127,21 @@ export function handleSendTask(
     return textResult({ error: "Invalid JSON payload" });
   }
 
+  // Unwrap single-key wrapper objects (e.g. {findings:[...]} -> [...])
+  if (type === "review_bundle" || type === "response") {
+    parsedPayload = unwrapArrayPayload(parsedPayload);
+  }
+
   if (type === "review_bundle") {
     if (!Array.isArray(parsedPayload) || parsedPayload.length < MIN_BANDWIDTH) {
+      const receivedDescription = Array.isArray(parsedPayload)
+        ? parsedPayload.length
+        : typeof parsedPayload === "object" && parsedPayload !== null
+          ? `object with keys: ${Object.keys(parsedPayload).join(", ")}`
+          : typeof parsedPayload;
       return textResult({
         error: `Review bundles must contain at least ${MIN_BANDWIDTH} findings (QSG bandwidth constraint: Γ_h = mN·h/α > 1)`,
-        received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
+        received: receivedDescription,
         required: MIN_BANDWIDTH,
       });
     }
@@ -126,9 +149,14 @@ export function handleSendTask(
 
   if (type === "response") {
     if (!Array.isArray(parsedPayload) || parsedPayload.length === 0) {
+      const receivedDescription = Array.isArray(parsedPayload)
+        ? parsedPayload.length
+        : typeof parsedPayload === "object" && parsedPayload !== null
+          ? `object with keys: ${Object.keys(parsedPayload).join(", ")}`
+          : typeof parsedPayload;
       return textResult({
         error: "Response must contain at least one FindingResponse",
-        received: Array.isArray(parsedPayload) ? parsedPayload.length : 0,
+        received: receivedDescription,
       });
     }
   }
