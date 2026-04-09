@@ -18,6 +18,7 @@ export function createFreshState(): BrokerState {
     taskQueues: new Map(),
     phaseWaiters: new Map(),
     sentTaskTypes: new Map(),
+    skillEvolution: new Map(),
   };
 }
 
@@ -82,4 +83,44 @@ export function makeResponsePayload(count: number): object[] {
     verdict: "accept",
     evidence: `Response evidence ${i}`,
   }));
+}
+
+/**
+ * Build a minimal valid SkillPackage payload.
+ */
+export function makeSkillPackagePayload(
+  skillId = "skill-001",
+  artifactCount = 2,
+  evolutionRound = 0,
+): object {
+  return {
+    skillId,
+    name: `Test Skill ${skillId}`,
+    description: "A test skill package",
+    artifacts: Array.from({ length: artifactCount }, (_, i) => ({
+      filename: i === 0 ? "index.ts" : `helper-${i}.ts`,
+      content: `// artifact ${i}`,
+      role: i === 0 ? "entry" : "helper",
+    })),
+    evolutionRound,
+  };
+}
+
+/**
+ * Build a minimal valid SkillVerification payload.
+ */
+export function makeSkillVerificationPayload(
+  skillId = "skill-001",
+  pass = true,
+  score = 0.85,
+): object {
+  return {
+    skillId,
+    pass,
+    score,
+    feedback: pass ? "Skill meets requirements" : "Skill needs improvement",
+    testCases: [
+      { input: "test input", expectedBehavior: "expected output", passed: pass },
+    ],
+  };
 }

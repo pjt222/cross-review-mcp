@@ -5,6 +5,12 @@
  * - Finding bundles enforce bandwidth m ≥ 3 to stay in the selection regime
  * - Response verdicts with evidence structurally enforce α < 1
  * - Phase signaling prevents premature consensus
+ *
+ * EvoSkills integration (Zhang et al., 2026, arXiv:2604.01687):
+ * - Skill Generator ↔ Surrogate Verifier co-evolution maps onto
+ *   the two-agent cross-review architecture
+ * - Multi-file skill packages exchanged as structured artifacts
+ * - Iterative refinement bounded by MAX_EVOLUTION_ROUNDS
  */
 
 // --- Phase lifecycle ---
@@ -99,16 +105,55 @@ export interface FindingResponse {
   counterEvidence?: string;
 }
 
+// --- EvoSkills: Skill packages (Zhang et al., 2026) ---
+
+export interface SkillArtifact {
+  filename: string;
+  content: string;
+  role: "entry" | "helper" | "config" | "test";
+}
+
+export interface SkillPackage {
+  skillId: string;
+  name: string;
+  description: string;
+  artifacts: SkillArtifact[];
+  evolutionRound: number;
+  parentSkillId?: string;
+}
+
+export interface SkillVerification {
+  skillId: string;
+  pass: boolean;
+  score: number;
+  feedback: string;
+  testCases: SkillTestCase[];
+}
+
+export interface SkillTestCase {
+  input: string;
+  expectedBehavior: string;
+  passed: boolean;
+  observation?: string;
+}
+
+export interface SkillEvolutionState {
+  agentId: string;
+  currentRound: number;
+  skillHistory: { skillId: string; score: number }[];
+  converged: boolean;
+}
+
 // --- Task envelope ---
 
-export type TaskType = "briefing" | "review_bundle" | "question" | "response" | "synthesis";
+export type TaskType = "briefing" | "review_bundle" | "question" | "response" | "synthesis" | "skill_bundle" | "skill_verification";
 
 export interface Task {
   id: string;
   from: string;
   to: string;
   type: TaskType;
-  payload: Briefing | Finding[] | Question | FindingResponse[] | Synthesis;
+  payload: Briefing | Finding[] | Question | FindingResponse[] | Synthesis | SkillPackage | SkillVerification;
   createdAt: number;
 }
 
@@ -128,6 +173,8 @@ export interface BrokerState {
   phaseWaiters: Map<string, PhaseWaiter[]>;
   /** Track task types each agent has sent, for phase precondition checks. */
   sentTaskTypes: Map<string, Set<TaskType>>;
+  /** EvoSkills: per-agent skill evolution state. */
+  skillEvolution: Map<string, SkillEvolutionState>;
 }
 
 export interface PhaseWaiter {
@@ -146,6 +193,22 @@ export interface PhaseWaiter {
  * without raising this constant degrades selection pressure.
  */
 export const MIN_BANDWIDTH = 5;
+
+/**
+ * EvoSkills co-evolutionary constants (Zhang et al., 2026).
+ *
+ * MAX_EVOLUTION_ROUNDS: Paper shows skills surpass human-curated
+ * quality within 5 iterations; capping prevents runaway loops.
+ *
+ * MIN_SKILL_ARTIFACTS: Skills are multi-file packages by definition;
+ * a single file is just a script, not a composable skill.
+ *
+ * SKILL_CONVERGENCE_THRESHOLD: When consecutive verification scores
+ * differ by less than this, the skill is considered converged.
+ */
+export const MAX_EVOLUTION_ROUNDS = 5;
+export const MIN_SKILL_ARTIFACTS = 2;
+export const SKILL_CONVERGENCE_THRESHOLD = 0.05;
 
 // --- MemPalace integration ---
 

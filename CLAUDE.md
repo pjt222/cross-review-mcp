@@ -1,6 +1,6 @@
 # Cross-Review MCP Broker
 
-MCP server enabling two Claude Code instances to review each other's projects through structured artifact exchange. Design informed by QSG scaling laws (Tanaka, arXiv:2603.24676).
+MCP server enabling two Claude Code instances to review each other's projects through structured artifact exchange. Design informed by QSG scaling laws (Tanaka, arXiv:2603.24676) and EvoSkills co-evolutionary verification (Zhang et al., arXiv:2604.01687).
 
 ## Quick Start
 
@@ -19,6 +19,7 @@ Single-process HTTP server with in-memory state. Two Claude Code instances conne
 - **Task queues**: per-agent message buffers (send_task / poll_tasks)
 - **Phase signaling**: lifecycle coordination with blocking wait (signal_phase / wait_for_phase)
 - **Bandwidth enforcement**: review bundles must contain ≥ 5 findings (QSG constraint, Γ_h ≈ 1.67)
+- **Skill evolution**: agents exchange multi-file skill packages and co-evolve them via surrogate verification (EvoSkills)
 
 ## QSG Theory (Tanaka, 2026)
 
@@ -30,6 +31,18 @@ The drift-selection parameter Γ_h = mN·h/α determines whether multi-agent agr
 - **h** = systematic bias (domain expertise)
 
 With N=2 and m ≥ 5, the system stays safely in the selection regime (Γ_h ≈ 1.67).
+
+## EvoSkills Theory (Zhang et al., 2026)
+
+EvoSkills enables agents to autonomously construct and refine multi-file skill packages through co-evolutionary verification. The two-agent cross-review topology maps naturally onto this:
+
+- **Skill Generator**: One agent creates a skill package (≥ 2 artifacts) and sends it to the peer
+- **Surrogate Verifier**: The peer synthesizes test cases and returns a verification score + feedback
+- **Co-evolution**: The generator refines the skill using feedback, up to 5 rounds
+- **Convergence**: When consecutive scores stabilize (Δ < 0.05), the skill is considered converged
+- **Cross-model transfer**: Evolved skills transfer effectively across different LLMs (35–45pp gains)
+
+Task types: `skill_bundle` (generator → verifier) and `skill_verification` (verifier → generator).
 
 ## CLI Orchestrator
 
