@@ -597,6 +597,78 @@ export function handleGetStatus(state: BrokerState): ToolResult {
   });
 }
 
+export function handleGenerateSynthesis(
+  state: BrokerState,
+  args: { agentId: string },
+): ToolResult {
+  const { agentId } = args;
+
+  if (!state.agents.has(agentId)) {
+    return textResult({ error: "Agent not registered", agentId });
+  }
+
+  const agent = state.agents.get(agentId)!;
+
+  // Gather all tasks across all agents (history, round archives, and current queues)
+  const allTasks: Task[] = [];
+  for (const [, tasks] of state.taskHistory) allTasks.push(...tasks);
+  for (const [, rounds] of state.roundHistory) allTasks.push(...rounds.flat());
+  for (const [, queue] of state.taskQueues) allTasks.push(...queue);
+
+  // Find review_bundles targeting this agent (findings about this agent's project)
+  const reviewBundles = allTasks.filter((t) => t.type === "review_bundle" && t.to === agentId);
+  const findings: Array<{ id: string; category: string; description: string; from: string }> = [];
+  for (const bundle of reviewBundles) {
+    if (Array.isArray(bundle.payload)) {
+      for (const f of bundle.payload as Array<{ id?: string; category?: string; description?: string }>) {
+        if (f.id) {
+          findings.push({ id: f.id, category: f.category ?? "unknown", description: f.description ?? "", from: bundle.from });
+        }
+      }
+    }
+  }
+
+  // Find responses sent by this agent (verdicts on findings about this project)
+  const responses = allTasks.filter((t) => t.type === "response" && t.from === agentId);
+  const verdictMap = new Map<string, { verdict: string; evidence: string }>();
+  for (const resp of responses) {
+    if (Array.isArray(resp.payload)) {
+      for (const r of resp.payload as Array<{ findingId?: string; verdict?: string; evidence?: string }>) {
+        if (r.findingId) {
+          verdictMap.set(r.findingId, { verdict: r.verdict ?? "discuss", evidence: r.evidence ?? "" });
+        }
+      }
+    }
+  }
+
+  // Classify findings
+  const accepted: Array<{ findingId: string; category: string; description: string; action: string }> = [];
+  const rejected: Array<{ findingId: string; category: string; description: string; reason: string }> = [];
+  const discussing: Array<{ findingId: string; category: string; description: string }> = [];
+
+  for (const finding of findings) {
+    const verdict = verdictMap.get(finding.id);
+    if (!verdict) {
+      discussing.push({ findingId: finding.id, category: finding.category, description: finding.description });
+    } else if (verdict.verdict === "accept") {
+      accepted.push({ findingId: finding.id, category: finding.category, description: finding.description, action: "TODO" });
+    } else if (verdict.verdict === "reject") {
+      rejected.push({ findingId: finding.id, category: finding.category, description: finding.description, reason: verdict.evidence });
+    } else {
+      discussing.push({ findingId: finding.id, category: finding.category, description: finding.description });
+    }
+  }
+
+  return textResult({
+    agentId,
+    project: agent.project,
+    draft: { accepted, rejected, discussing },
+    findingsProcessed: findings.length,
+    responsesProcessed: verdictMap.size,
+    hint: "Edit accepted[].action and rejected[].reason, then send as synthesis task",
+  });
+}
+
 export function handleGetSkillStatus(
   state: BrokerState,
   args: { agentId: string },

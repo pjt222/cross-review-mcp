@@ -41,6 +41,7 @@ import {
   handleResetRound,
   handleGetHistory,
   handleGetFindingStatus,
+  handleGenerateSynthesis,
 } from "./broker.js";
 import type { MemPalaceState } from "./types.js";
 import {
@@ -263,6 +264,16 @@ function createBrokerServer(brokerState: BrokerState, mpState: MemPalaceState): 
     "Get the current broker state: registered agents, their phases, and pending task counts.",
     {},
     async () => handleGetStatus(brokerState)
+  );
+
+  // Tool: generate_synthesis
+  server.tool(
+    "generate_synthesis",
+    "Generate a structured synthesis draft from review history. Reads task history and current queue to group findings by verdict (accepted/rejected/discussing). Edit the draft then send as a synthesis task.",
+    {
+      agentId: z.string().describe("Your agent ID"),
+    },
+    async (args) => handleGenerateSynthesis(brokerState, args)
   );
 
   // Tool: get_skill_status (EvoSkills)
